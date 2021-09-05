@@ -40,3 +40,5 @@ tests/.ducktape
 .cache
 
 docs/generated/
+
+kafka-logs/
