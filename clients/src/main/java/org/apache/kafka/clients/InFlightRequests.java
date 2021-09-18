@@ -86,6 +86,7 @@ final class InFlightRequests {
      */
     public boolean canSendMore(String node) {
         Deque<ClientRequest> queue = requests.get(node);
+        // 队列中第一个节点的request已经被发送完成，且总的处于待发送的request数量 < maxInFlightRequestsPerConnection（默认5个）
         return queue == null || queue.isEmpty() ||
                (queue.peekFirst().request().completed() && queue.size() < this.maxInFlightRequestsPerConnection);
     }
@@ -136,7 +137,9 @@ final class InFlightRequests {
         List<String> nodeIds = new LinkedList<String>();
         for (String nodeId : requests.keySet()) {
             if (inFlightRequestCount(nodeId) > 0) {
+                // 该nodeId对应的deque中的最后一个包，即最早放进去的那个request
                 ClientRequest request = requests.get(nodeId).peekLast();
+                // 校验是否超时
                 long timeSinceSend = now - request.sendTimeMs();
                 if (timeSinceSend > requestTimeout) {
                     nodeIds.add(nodeId);

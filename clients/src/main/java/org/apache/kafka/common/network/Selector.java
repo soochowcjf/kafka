@@ -155,16 +155,26 @@ public class Selector implements Selectable {
             throw new IllegalStateException("There is already a connection for id " + id);
 
         SocketChannel socketChannel = SocketChannel.open();
+        // 设置非阻塞模式
         socketChannel.configureBlocking(false);
         Socket socket = socketChannel.socket();
+        // 点进去看源码注释，设置为true的话，就是使用tcp传输层的连接保障，如果2h都没有数据交互，那么就发送一个探测包过去，以便维持长连接，
+        // 当然也有在应用层自己实现心跳机制的，kafka这里直接使用了传输层的tcp心跳机制
         socket.setKeepAlive(true);
+        // 设置发送缓冲区
         if (sendBufferSize != Selectable.USE_DEFAULT_BUFFER_SIZE)
             socket.setSendBufferSize(sendBufferSize);
+        // 设置接收缓冲区
         if (receiveBufferSize != Selectable.USE_DEFAULT_BUFFER_SIZE)
             socket.setReceiveBufferSize(receiveBufferSize);
+        // 设置为true呢，就会禁用nagle算法，tcp就会尽快将小的数据包发送出去，降低延迟
+        // 设置为false的，就会开启nagle算法，tcp就会尽可能的收集小的数据包，然后依次发送出去，吞吐量增大，但是延迟也会提高
         socket.setTcpNoDelay(true);
         boolean connected;
         try {
+            // 看源码注释呢，说非阻塞模式下，如果是连接远端服务器，会立刻返回false，此时呢，tcp会在后台去进行三次握手，需要等到selector轮询到OP_CONNECT事件，这时候，才是连接才建立了，这是需要调用 finishConnect()
+            //  finishConnect() 这个方法，我猜测，应该是tcp连接已经建好了，调这个方法，就是初始化本地应用层的资源而已
+            //  如果是连接本机localhost，那么该方法会立刻返回true
             connected = socketChannel.connect(address);
         } catch (UnresolvedAddressException e) {
             socketChannel.close();
@@ -173,15 +183,21 @@ public class Selector implements Selectable {
             socketChannel.close();
             throw e;
         }
+        // 将这个socketChannel注册到nioSelector上，且关注感兴趣的连接事件
         SelectionKey key = socketChannel.register(nioSelector, SelectionKey.OP_CONNECT);
+        // 将selectionKey封装到KafkaChannel
         KafkaChannel channel = channelBuilder.buildChannel(id, key, maxReceiveSize);
+        // 将kafkaChannel设置到SelectionKey的attachment，这样后面selector轮询到某个事件时，就可以直接取出该KafkaChannel
         key.attach(channel);
+        // 设置brokerId和KafkaChannel的关系
         this.channels.put(id, channel);
 
+        // 如果是连接本机localhost的话，connected会是true
         if (connected) {
             // OP_CONNECT won't trigger for immediately connected channels
             log.debug("Immediately connected to node {}", channel.id());
             immediatelyConnectedKeys.add(key);
+            // 设置感兴趣的时间为空，即取消对OP_CONNECT事件的兴趣
             key.interestOps(0);
         }
     }
@@ -284,6 +300,7 @@ public class Selector implements Selectable {
             pollSelectionKeys(immediatelyConnectedKeys, true);
         }
 
+        // 添加stagedReceives到completedReceives中去，每个channel每次只会取一条receive
         addToCompletedReceives();
 
         long endIo = time.nanoseconds();
@@ -296,6 +313,7 @@ public class Selector implements Selectable {
         while (iterator.hasNext()) {
             SelectionKey key = iterator.next();
             iterator.remove();
+            // 取出key对应的attachment，即kafkaChannel
             KafkaChannel channel = channel(key);
 
             // register all per-connection metrics at once
@@ -306,6 +324,7 @@ public class Selector implements Selectable {
 
                 /* complete any connections that have finished their handshake (either normally or immediately) */
                 if (isImmediatelyConnected || key.isConnectable()) {
+                    // 完成连接
                     if (channel.finishConnect()) {
                         this.connected.add(channel.id());
                         this.sensors.connectionCreated.record();
@@ -317,17 +336,23 @@ public class Selector implements Selectable {
                 if (channel.isConnected() && !channel.ready())
                     channel.prepare();
 
+                // 如果该channel对应的stagedReceives中仍然有未处理的响应数据，那么就先不读取响应了
                 /* if channel is ready read from any connections that have readable data */
                 if (channel.ready() && key.isReadable() && !hasStagedReceive(channel)) {
                     NetworkReceive networkReceive;
+                    // 从channel中读取数据，底层会处理拆包、粘包问题
                     while ((networkReceive = channel.read()) != null)
+                        // 将读取到的响应添加到stagedReceives
                         addToStagedReceives(channel, networkReceive);
                 }
 
+                // 写事件
                 /* if channel is ready write to any sockets that have space in their buffer and for which we have data */
                 if (channel.ready() && key.isWritable()) {
+                    // 往channel中写，底层会处理拆包问题，如果当前channel的send没有完全被写完的话，此时是不允许重新从accumulator中继续拉取该channel的batch的
                     Send send = channel.write();
                     if (send != null) {
+                        // 如果当前send写完了，那么就加入到completedSends中
                         this.completedSends.add(send);
                         this.sensors.recordBytesSent(channel.id(), send.size());
                     }

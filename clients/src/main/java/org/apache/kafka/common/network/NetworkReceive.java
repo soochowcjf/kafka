@@ -77,23 +77,28 @@ public class NetworkReceive implements Receive {
     @Deprecated
     public long readFromReadableChannel(ReadableByteChannel channel) throws IOException {
         int read = 0;
+        // 如果长度域size还有空间，说明可以从channel中读取字节存放进去，可能size是完全空的，也有可能是上一次没读满
         if (size.hasRemaining()) {
             int bytesRead = channel.read(size);
             if (bytesRead < 0)
                 throw new EOFException();
             read += bytesRead;
             if (!size.hasRemaining()) {
+                // 长度域position归零
                 size.rewind();
+                // 读取长度域的int值
                 int receiveSize = size.getInt();
                 if (receiveSize < 0)
                     throw new InvalidReceiveException("Invalid receive (size = " + receiveSize + ")");
                 if (maxSize != UNLIMITED && receiveSize > maxSize)
                     throw new InvalidReceiveException("Invalid receive (size = " + receiveSize + " larger than " + maxSize + ")");
 
+                // 分配容纳后面消息体的byteBuffer
                 this.buffer = ByteBuffer.allocate(receiveSize);
             }
         }
         if (buffer != null) {
+            // 读取消息体到buffer中
             int bytesRead = channel.read(buffer);
             if (bytesRead < 0)
                 throw new EOFException();

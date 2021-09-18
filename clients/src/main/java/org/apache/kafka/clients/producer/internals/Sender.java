@@ -184,6 +184,7 @@ public class Sender implements Runnable {
         while (iter.hasNext()) {
             Node node = iter.next();
             if (!this.client.ready(node, now)) {
+                // 如果与该broker的连接还没有建立好，就先移除
                 iter.remove();
                 notReadyTimeout = Math.min(notReadyTimeout, this.client.connectionDelay(node, now));
             }
@@ -220,6 +221,7 @@ public class Sender implements Runnable {
             pollTimeout = 0;
         }
         for (ClientRequest request : requests)
+            // 将该request加入到inFlightRequests，并将该send设置到KafkaChannel的send属性中，后面供发送
             client.send(request, now);
 
         // if some partitions are already ready to be sent, the select time would be 0;
@@ -251,16 +253,20 @@ public class Sender implements Runnable {
      */
     private void handleProduceResponse(ClientResponse response, Map<TopicPartition, RecordBatch> batches, long now) {
         int correlationId = response.request().request().header().correlationId();
+        // 如果是连接断开
         if (response.wasDisconnected()) {
             log.trace("Cancelled request {} due to node {} being disconnected", response, response.request()
                                                                                                   .request()
                                                                                                   .destination());
+            // 直接回调response对应的所有的batch集合
             for (RecordBatch batch : batches.values())
                 completeBatch(batch, Errors.NETWORK_EXCEPTION, -1L, Record.NO_TIMESTAMP, correlationId, now);
         } else {
             log.trace("Received produce response from node {} with correlation id {}",
                       response.request().request().destination(),
                       correlationId);
+
+            // 正常的响应
             // if we have a response, parse it
             if (response.hasResponse()) {
                 ProduceResponse produceResponse = new ProduceResponse(response.responseBody());
@@ -275,6 +281,7 @@ public class Sender implements Runnable {
                 this.sensors.recordThrottleTime(response.request().request().destination(),
                                                 produceResponse.getThrottleTime());
             } else {
+                // 不需要响应的response回调
                 // this is the acks = 0 case, just complete all requests
                 for (RecordBatch batch : batches.values())
                     completeBatch(batch, Errors.NONE, -1L, Record.NO_TIMESTAMP, correlationId, now);
@@ -300,6 +307,7 @@ public class Sender implements Runnable {
                      batch.topicPartition,
                      this.retries - batch.attempts - 1,
                      error);
+            // 重新入队
             this.accumulator.reenqueue(batch, now);
             this.sensors.recordRetries(batch.topicPartition.topic(), batch.recordCount);
         } else {
@@ -308,8 +316,10 @@ public class Sender implements Runnable {
                 exception = new TopicAuthorizationException(batch.topicPartition.topic());
             else
                 exception = error.exception();
+            // 调用batch中每条消息的回调函数
             // tell the user the result of their request
             batch.done(baseOffset, timestamp, exception);
+            // 将batch底层的buffer加入到free链表中
             this.accumulator.deallocate(batch);
             if (error != Errors.NONE)
                 this.sensors.recordErrors(batch.topicPartition.topic(), batch.recordCount);
@@ -349,12 +359,18 @@ public class Sender implements Runnable {
             produceRecordsByPartition.put(tp, batch.records.buffer());
             recordsByPartition.put(tp, batch);
         }
+        // 构造ProduceRequest请求，内部会根据协议，来组合数据
         ProduceRequest request = new ProduceRequest(acks, timeout, produceRecordsByPartition);
+        // 将数据封装成RequestSend，内部将数据写入ByteBuffer
         RequestSend send = new RequestSend(Integer.toString(destination),
                                            this.client.nextRequestHeader(ApiKeys.PRODUCE),
                                            request.toStruct());
+        // 封装某个node节点，一次请求（包含多个batch）的处理回调
         RequestCompletionHandler callback = new RequestCompletionHandler() {
+
+            @Override
             public void onComplete(ClientResponse response) {
+                // 处理响应
                 handleProduceResponse(response, recordsByPartition, time.milliseconds());
             }
         };

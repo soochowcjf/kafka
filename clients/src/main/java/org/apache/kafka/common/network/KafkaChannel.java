@@ -122,6 +122,8 @@ public class KafkaChannel {
         if (this.send != null)
             throw new IllegalStateException("Attempt to begin a send operation with prior send operation still in progress.");
         this.send = send;
+        // 跟进去呢，会给SelectionKey添加感兴趣写事件
+        // 写缓冲有大小的时候呢，selector就可以监听到写事件，那么就可以将该send发送到SocketChannel去
         this.transportLayer.addInterestOps(SelectionKey.OP_WRITE);
     }
 
@@ -133,9 +135,12 @@ public class KafkaChannel {
         }
 
         receive(receive);
+        // 判断receive是否读满（size和buffer都满了，说明是一个完整的包了）
         if (receive.complete()) {
+            // 将消息体的byteBuffer的position归零，以便后面读取
             receive.payload().rewind();
             result = receive;
+            // 将receive引用置为null，后面从channel读的时候，是需要重新new一个NetworkReceive的
             receive = null;
         }
         return result;
@@ -145,6 +150,7 @@ public class KafkaChannel {
         Send result = null;
         if (send != null && send(send)) {
             result = send;
+            // 如果该send完全写出去了，那么将该channel的send置为null
             send = null;
         }
         return result;
@@ -159,6 +165,7 @@ public class KafkaChannel {
         if (send.completed())
             transportLayer.removeInterestOps(SelectionKey.OP_WRITE);
 
+        // 返回该send是否全部写完毕
         return send.completed();
     }
 

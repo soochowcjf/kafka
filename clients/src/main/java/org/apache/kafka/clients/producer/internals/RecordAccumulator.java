@@ -238,6 +238,8 @@ public final class RecordAccumulator {
                     // iterate over the batches and expire them if they have been in the accumulator for more than requestTimeOut
                     RecordBatch lastBatch = dq.peekLast();
                     Iterator<RecordBatch> batchIterator = dq.iterator();
+                    // 从对尾开始遍历，直至那个batch没有超时就break
+                    // 这里有一种情况，就是重试的batch会重新入队头，这样后面的batch就会等这个重试的发送出去才会发送，重试的batch是有重试间隔的，很容易导致后面的batch超时，所以是需要在这里校验的
                     while (batchIterator.hasNext()) {
                         RecordBatch batch = batchIterator.next();
                         boolean isFull = batch != lastBatch || batch.records.isFull();
@@ -270,6 +272,7 @@ public final class RecordAccumulator {
         batch.lastAppendTime = now;
         batch.setRetry();
         Deque<RecordBatch> deque = getOrCreateDeque(batch.topicPartition);
+        // 加入到队头，优先发送
         synchronized (deque) {
             deque.addFirst(batch);
         }
@@ -301,6 +304,7 @@ public final class RecordAccumulator {
         long nextReadyCheckDelayMs = Long.MAX_VALUE;
         boolean unknownLeadersExist = false;
 
+        // 判断是否内存缓冲是否满了
         boolean exhausted = this.free.queued() > 0;
         for (Map.Entry<TopicPartition, Deque<RecordBatch>> entry : this.batches.entrySet()) {
             TopicPartition part = entry.getKey();
@@ -311,14 +315,22 @@ public final class RecordAccumulator {
                 unknownLeadersExist = true;
             } else if (!readyNodes.contains(leader) && !muted.contains(part)) {
                 synchronized (deque) {
+                    // 该TopicPartition下的第一个batch
                     RecordBatch batch = deque.peekFirst();
                     if (batch != null) {
+                        // 是否需要重试且已经过了重试间隔 true 没过重试间隔 ； false 不需要重试或者已经过了重试间隔
                         boolean backingOff = batch.attempts > 0 && batch.lastAttemptMs + retryBackoffMs > nowMs;
+                        // 该batch已经滞留的时间
                         long waitedTimeMs = nowMs - batch.lastAttemptMs;
+                        // 需要等待的时间，（如果是需要重试，且还没过重试间隔，那么需要等待重试间隔 retryBackoffMs）；（如果是不需要重试，或者需要重试且已经过了重试间隔，那么需要等待 lingerMs）
                         long timeToWaitMs = backingOff ? retryBackoffMs : lingerMs;
+                        // batch还剩余被发送的时间
                         long timeLeftMs = Math.max(timeToWaitMs - waitedTimeMs, 0);
+                        // 第一个batch是否已满
                         boolean full = deque.size() > 1 || batch.records.isFull();
+                        // 是否已经超时
                         boolean expired = waitedTimeMs >= timeToWaitMs;
+                        // 第一个batch满了 | batch到时间了 | 内存缓冲满了 | 内存缓冲器被关闭了 | *
                         boolean sendable = full || expired || exhausted || closed || flushInProgress();
                         if (sendable && !backingOff) {
                             readyNodes.add(leader);
@@ -326,6 +338,7 @@ public final class RecordAccumulator {
                             // Note that this results in a conservative estimate since an un-sendable partition may have
                             // a leader that will later be found to have sendable data. However, this is good enough
                             // since we'll just wake up and then sleep again for the remaining time.
+                            // 下一次需要再来检查可发送node的时间间隔
                             nextReadyCheckDelayMs = Math.min(timeLeftMs, nextReadyCheckDelayMs);
                         }
                     }
@@ -384,15 +397,21 @@ public final class RecordAccumulator {
                         synchronized (deque) {
                             RecordBatch first = deque.peekFirst();
                             if (first != null) {
+                                // 需要重试 且还没过充实间隔
                                 boolean backoff = first.attempts > 0 && first.lastAttemptMs + retryBackoffMs > now;
                                 // Only drain the batch if it is not during backoff period.
+                                // 非backoff，有两种情况：
+                                //      1、不需要重试
+                                //      2、需要重试，但是已经过了重试间隔
                                 if (!backoff) {
+                                    // 总request的大小是否已经超过单个请求最大值
                                     if (size + first.records.sizeInBytes() > maxSize && !ready.isEmpty()) {
                                         // there is a rare case that a single batch size is larger than the request size due
                                         // to compression; in this case we will still eventually send this batch in a single
                                         // request
                                         break;
                                     } else {
+                                        // 取出队列第一个
                                         RecordBatch batch = deque.pollFirst();
                                         batch.records.close();
                                         size += batch.records.sizeInBytes();

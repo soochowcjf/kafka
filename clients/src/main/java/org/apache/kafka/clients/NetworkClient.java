@@ -156,6 +156,7 @@ public class NetworkClient implements KafkaClient {
 
         if (connectionStates.canConnect(node.idString(), now))
             // if we are interested in sending to a node and we don't have a connection to it, initiate one
+            // 初始化连接
             initiateConnect(node, now);
 
         return false;
@@ -240,6 +241,7 @@ public class NetworkClient implements KafkaClient {
 
     private void doSend(ClientRequest request, long now) {
         request.setSendTimeMs(now);
+        // 加到飞行中的请求集合，哈哈。。。飞行中
         this.inFlightRequests.add(request);
         selector.send(request.request());
     }
@@ -265,10 +267,20 @@ public class NetworkClient implements KafkaClient {
         // process completed actions
         long updatedNow = this.time.milliseconds();
         List<ClientResponse> responses = new ArrayList<>();
+
+        // 处理此次发送的、且不要接受响应的请求，为他们构造response
         handleCompletedSends(responses, updatedNow);
+
+        // 处理此次接受的receive，关联到对应的ClientRequest
         handleCompletedReceives(responses, updatedNow);
+
+        // 处理连接断开的情况
         handleDisconnections(responses, updatedNow);
+
+        // 处理连接
         handleConnections();
+
+        // 处理超时的情况
         handleTimedOutRequests(responses, updatedNow);
 
         // invoke callbacks
@@ -378,6 +390,7 @@ public class NetworkClient implements KafkaClient {
         short apiKey = requestHeader.apiKey();
         short apiVer = requestHeader.apiVersion();
         Struct responseBody = ProtoUtils.responseSchema(apiKey, apiVer).read(responseBuffer);
+        // 校验request的correlationId与response的correlationId是否一样，不一样是要抛出异常的
         correlate(requestHeader, responseHeader);
         return responseBody;
     }
@@ -391,6 +404,7 @@ public class NetworkClient implements KafkaClient {
      */
     private void processDisconnection(List<ClientResponse> responses, String nodeId, long now) {
         connectionStates.disconnected(nodeId, now);
+        // 该node对应的所有的request直接封装response
         for (ClientRequest request : this.inFlightRequests.clearAll(nodeId)) {
             log.trace("Cancelled request {} due to node {} being disconnected", request, nodeId);
             if (!metadataUpdater.maybeHandleDisconnection(request))
@@ -408,6 +422,7 @@ public class NetworkClient implements KafkaClient {
     private void handleTimedOutRequests(List<ClientResponse> responses, long now) {
         List<String> nodeIds = this.inFlightRequests.getNodesWithTimedOutRequests(now, this.requestTimeoutMs);
         for (String nodeId : nodeIds) {
+            // 直接断开连接
             // close connection to the node
             this.selector.close(nodeId);
             log.debug("Disconnecting from node {} due to request timeout.", nodeId);
@@ -429,8 +444,11 @@ public class NetworkClient implements KafkaClient {
         // if no response is expected then when the send is completed, return it
         for (Send send : this.selector.completedSends()) {
             ClientRequest request = this.inFlightRequests.lastSent(send.destination());
+            // 如果不需要响应，即acks=0
             if (!request.expectResponse()) {
+                // 从inFlightRequests移除该send
                 this.inFlightRequests.completeLastSent(send.destination());
+                // 构造response
                 responses.add(new ClientResponse(request, now, false, null));
             }
         }
@@ -445,9 +463,12 @@ public class NetworkClient implements KafkaClient {
     private void handleCompletedReceives(List<ClientResponse> responses, long now) {
         for (NetworkReceive receive : this.selector.completedReceives()) {
             String source = receive.source();
+            // 从inFlightRequests中取队尾的request，即该response所一一对应的request
             ClientRequest req = inFlightRequests.completeNext(source);
+            // 按照kafka协议解析读取到的消息体，封装到struct
             Struct body = parseResponse(receive.payload(), req.request().header());
             if (!metadataUpdater.maybeHandleCompletedReceive(req, now, body))
+                // 将响应封装到response
                 responses.add(new ClientResponse(req, now, false, body));
         }
     }
