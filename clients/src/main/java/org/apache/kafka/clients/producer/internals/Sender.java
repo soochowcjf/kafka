@@ -171,6 +171,7 @@ public class Sender implements Runnable {
      */
     void run(long now) {
         Cluster cluster = metadata.fetch();
+        // 获取已经可以发送数据的node节点
         // get the list of partitions with data ready to send
         RecordAccumulator.ReadyCheckResult result = this.accumulator.ready(cluster, now);
 
@@ -203,6 +204,7 @@ public class Sender implements Runnable {
             }
         }
 
+        // 处理超时的batch
         List<RecordBatch> expiredBatches = this.accumulator.abortExpiredBatches(this.requestTimeout, now);
         // update sensors
         for (RecordBatch expiredBatch : expiredBatches)

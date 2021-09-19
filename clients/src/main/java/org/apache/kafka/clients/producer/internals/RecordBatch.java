@@ -67,6 +67,7 @@ public final class RecordBatch {
         if (!this.records.hasRoomFor(key, value)) {
             return null;
         } else {
+            // 将数据写进底层的MemoryRecords的byteBuffer
             long checksum = this.records.append(offsetCounter++, timestamp, key, value);
             this.maxRecordSize = Math.max(this.maxRecordSize, Record.recordSize(key, value));
             this.lastAppendTime = now;
@@ -75,6 +76,7 @@ public final class RecordBatch {
                                                                    key == null ? -1 : key.length,
                                                                    value == null ? -1 : value.length);
             if (callback != null)
+                // 每条消息的回调
                 thunks.add(new Thunk(callback, future));
             this.recordCount++;
             return future;

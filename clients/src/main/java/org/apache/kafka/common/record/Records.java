@@ -22,9 +22,9 @@ package org.apache.kafka.common.record;
  */
 public interface Records extends Iterable<LogEntry> {
 
-    int SIZE_LENGTH = 4;
     int OFFSET_LENGTH = 8;
-    int LOG_OVERHEAD = SIZE_LENGTH + OFFSET_LENGTH;
+    int SIZE_LENGTH = 4;
+    int LOG_OVERHEAD = OFFSET_LENGTH + SIZE_LENGTH;
 
     /**
      * The size of these records in bytes

@@ -105,6 +105,7 @@ public final class BufferPool {
             // now check if the request is immediately satisfiable with the
             // memory on hand or if we need to block
             int freeListSize = this.free.size() * this.poolableSize;
+            // 总内存大小大于此次需要分配的size
             if (this.availableMemory + freeListSize >= size) {
                 // we have enough unallocated or pooled memory to immediately
                 // satisfy the request
@@ -118,6 +119,7 @@ public final class BufferPool {
                 ByteBuffer buffer = null;
                 Condition moreMemory = this.lock.newCondition();
                 long remainingTimeToBlockNs = TimeUnit.MILLISECONDS.toNanos(maxTimeToBlockMs);
+                // 这里使用了队列来保存condition，看似简单，实则原理还是比较复杂的，需要仔细想想
                 this.waiters.addLast(moreMemory);
                 // loop over and over until we have a buffer or have reserved
                 // enough memory to allocate one
@@ -126,6 +128,7 @@ public final class BufferPool {
                     long timeNs;
                     boolean waitingTimeElapsed;
                     try {
+                        // 线程等待，直到有内存块被释放了，会被唤醒
                         waitingTimeElapsed = !moreMemory.await(remainingTimeToBlockNs, TimeUnit.NANOSECONDS);
                     } catch (InterruptedException e) {
                         this.waiters.remove(moreMemory);
@@ -189,6 +192,7 @@ public final class BufferPool {
      * buffers (if needed)
      */
     private void freeUp(int size) {
+        // 如果free链表不为空，并且可用内存大小 < size,那么就从free链表中移一点byteBuffer出来，知道可用内存大小够分配此次的size大小
         while (!this.free.isEmpty() && this.availableMemory < size)
             this.availableMemory += this.free.pollLast().capacity();
     }
