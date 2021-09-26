@@ -208,8 +208,10 @@ public class Selector implements Selectable {
      * Note that we are not checking if the connection id is valid - since the connection already exists
      */
     public void register(String id, SocketChannel socketChannel) throws ClosedChannelException {
+        // 注册socketChannel到selector上，并关注感兴趣读事件
         SelectionKey key = socketChannel.register(nioSelector, SelectionKey.OP_READ);
         KafkaChannel channel = channelBuilder.buildChannel(id, key, maxReceiveSize);
+        // 将KafkaChannel设置到key的attachment上
         key.attach(channel);
         this.channels.put(id, channel);
     }
@@ -322,6 +324,7 @@ public class Selector implements Selectable {
 
             try {
 
+                // 这里是客户端的逻辑
                 /* complete any connections that have finished their handshake (either normally or immediately) */
                 if (isImmediatelyConnected || key.isConnectable()) {
                     // 完成连接
@@ -581,6 +584,7 @@ public class Selector implements Selectable {
             while (iter.hasNext()) {
                 Map.Entry<KafkaChannel, Deque<NetworkReceive>> entry = iter.next();
                 KafkaChannel channel = entry.getKey();
+                // 如果该channel不是静默，才可以继续将stagedReceives中的数据，转移到completedReceives中
                 if (!channel.isMute()) {
                     Deque<NetworkReceive> deque = entry.getValue();
                     NetworkReceive networkReceive = deque.poll();
