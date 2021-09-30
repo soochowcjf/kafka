@@ -72,6 +72,7 @@ private[timer] class TimerTaskList(taskCounter: AtomicInteger) extends Delayed {
       synchronized {
         timerTaskEntry.synchronized {
           if (timerTaskEntry.list == null) {
+            // 加入到尾节点上去
             // put the timer task entry to the end of the list. (root.prev points to the tail entry)
             val tail = root.prev
             timerTaskEntry.next = root
@@ -87,6 +88,7 @@ private[timer] class TimerTaskList(taskCounter: AtomicInteger) extends Delayed {
     }
   }
 
+  // 从TimerTaskList链表中移除这个节点
   // Remove the specified timer task entry from this list
   def remove(timerTaskEntry: TimerTaskEntry): Unit = {
     synchronized {
@@ -105,6 +107,7 @@ private[timer] class TimerTaskList(taskCounter: AtomicInteger) extends Delayed {
 
   // Remove all task entries and apply the supplied function to each of them
   def flush(f: (TimerTaskEntry)=>Unit): Unit = {
+    // 遍历TimerTaskList链表，然后执行 addTimerTaskEntry()
     synchronized {
       var head = root.next
       while (head ne root) {

@@ -390,6 +390,7 @@ public final class RecordAccumulator {
         Map<Integer, List<RecordBatch>> batches = new HashMap<>();
         for (Node node : nodes) {
             int size = 0;
+            // 获取该node节点上的leader partition
             List<PartitionInfo> parts = cluster.partitionsForNode(node.id());
             List<RecordBatch> ready = new ArrayList<>();
             /* to make starvation less likely this loop doesn't start at 0 */
@@ -404,7 +405,7 @@ public final class RecordAccumulator {
                         synchronized (deque) {
                             RecordBatch first = deque.peekFirst();
                             if (first != null) {
-                                // 需要重试 且还没过充实间隔
+                                // 需要重试 且还没过重试间隔
                                 boolean backoff = first.attempts > 0 && first.lastAttemptMs + retryBackoffMs > now;
                                 // Only drain the batch if it is not during backoff period.
                                 // 非backoff，有两种情况：

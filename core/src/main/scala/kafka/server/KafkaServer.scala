@@ -127,6 +127,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
 
   var kafkaController: KafkaController = null
 
+  // 默认10个后台线程
   val kafkaScheduler = new KafkaScheduler(config.backgroundThreads)
 
   var kafkaHealthcheck: KafkaHealthcheck = null
@@ -179,6 +180,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         /* setup zookeeper */
         zkUtils = initZk()
 
+        // 磁盘管理组件
         /* start log manager */
         logManager = createLogManager(zkUtils.zkClient, brokerState)
         logManager.startup()
@@ -190,6 +192,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         socketServer = new SocketServer(config, metrics, kafkaMetricsTime)
         socketServer.startup()
 
+        // 同步组件
         /* start replica manager */
         replicaManager = new ReplicaManager(config, metrics, time, kafkaMetricsTime, zkUtils, kafkaScheduler, logManager,
           isShuttingDown)
@@ -597,6 +600,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
     val defaultProps = KafkaServer.copyKafkaConfigToLog(config)
     val defaultLogConfig = LogConfig(defaultProps)
 
+    // 从zookeeper上拉取，每个topic对应的配置信息
     val configs = AdminUtils.fetchAllTopicConfigs(zkUtils).map { case (topic, configs) =>
       topic -> LogConfig.fromProps(defaultProps, configs)
     }
@@ -613,10 +617,15 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
                    topicConfigs = configs,
                    defaultConfig = defaultLogConfig,
                    cleanerConfig = cleanerConfig,
+                    // 默认1,每个目录默认一个恢复线程
                    ioThreads = config.numRecoveryThreadsPerDataDir,
+                    // 默认Long.MaxValue
                    flushCheckMs = config.logFlushSchedulerIntervalMs,
+                    // 默认1min
                    flushCheckpointMs = config.logFlushOffsetCheckpointIntervalMs,
+                    // 默认5min
                    retentionCheckMs = config.logCleanupIntervalMs,
+                    // 默认10个线程的调度任务线程池
                    scheduler = kafkaScheduler,
                    brokerState = brokerState,
                    time = time)

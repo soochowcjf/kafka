@@ -27,6 +27,7 @@ import kafka.common._
 import java.io._
 
 object OffsetCheckpoint {
+  // 匹配任意空白字符
   private val WhiteSpacesPattern = Pattern.compile("\\s+")
   private val CurrentVersion = 0
 }
@@ -47,13 +48,16 @@ class OffsetCheckpoint(val file: File) extends Logging {
       val fileOutputStream = new FileOutputStream(tempPath.toFile)
       val writer = new BufferedWriter(new OutputStreamWriter(fileOutputStream))
       try {
+        // 当前版本
         writer.write(CurrentVersion.toString)
         writer.newLine()
 
+        // 所有分区offsets的总长度
         writer.write(offsets.size.toString)
         writer.newLine()
 
         offsets.foreach { case (topicPart, offset) =>
+          // topic partition offset
           writer.write(s"${topicPart.topic} ${topicPart.partition} $offset")
           writer.newLine()
         }
@@ -87,18 +91,21 @@ class OffsetCheckpoint(val file: File) extends Logging {
         line = reader.readLine()
         if (line == null)
           return Map.empty
+        // 当前版本
         val version = line.toInt
         version match {
           case CurrentVersion =>
             line = reader.readLine()
             if (line == null)
               return Map.empty
+            // 数据长度
             val expectedSize = line.toInt
             val offsets = mutable.Map[TopicAndPartition, Long]()
             line = reader.readLine()
             while (line != null) {
               WhiteSpacesPattern.split(line) match {
                 case Array(topic, partition, offset) =>
+                  // 读取到map中
                   offsets += TopicAndPartition(topic, partition.toInt) -> offset.toLong
                   line = reader.readLine()
                 case _ => throw malformedLineException(line)

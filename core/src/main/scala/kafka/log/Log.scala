@@ -86,6 +86,7 @@ class Log(val dir: File,
   /* A lock that guards all modifications to the log */
   private val lock = new Object
 
+  // 最后一次刷新数据到磁盘的时间
   /* last time it was flushed */
   private val lastflushedTime = new AtomicLong(time.milliseconds)
 
@@ -98,6 +99,8 @@ class Log(val dir: File,
 
   /* the actual segments of the log */
   private val segments: ConcurrentNavigableMap[java.lang.Long, LogSegment] = new ConcurrentSkipListMap[java.lang.Long, LogSegment]
+
+  // 加载数据段文件到内存
   loadSegments()
 
   /* Calculate the offset of the next message */
@@ -138,6 +141,7 @@ class Log(val dir: File,
 
   /* Load the log segments from the log files on disk */
   private def loadSegments() {
+    // 例如目录可能是：sit_ulp_login_log-0
     // create the log directory if it doesn't exist
     dir.mkdirs()
     var swapFiles = Set[File]()
@@ -171,6 +175,7 @@ class Log(val dir: File,
     for(file <- dir.listFiles if file.isFile) {
       val filename = file.getName
       if(filename.endsWith(IndexFileSuffix)) {
+        // 校验每个.index文件都存在一个.log文件与之对应，如果没有的话，就删除
         // if it is an index file, make sure it has a corresponding .log file
         val logFile = new File(file.getAbsolutePath.replace(IndexFileSuffix, LogFileSuffix))
         if(!logFile.exists) {
@@ -179,11 +184,15 @@ class Log(val dir: File,
         }
       } else if(filename.endsWith(LogFileSuffix)) {
         // if its a log file, load the corresponding log segment
+        // 比如说一个新的topic的话，00000000000000000000.index  00000000000000000000.log ；start=00000000000000000000
         val start = filename.substring(0, filename.length - LogFileSuffix.length).toLong
         val indexFile = Log.indexFilename(dir, start)
         val segment = new LogSegment(dir = dir,
+                                      // 该segment的起始offset
                                      startOffset = start,
+                                      // 每写4096字节.log,就会写一条.index
                                      indexIntervalBytes = config.indexInterval,
+                                      // 索引文件的最大大小，默认 10m
                                      maxIndexSize = config.maxIndexSize,
                                      rollJitterMs = config.randomSegmentJitter,
                                      time = time,
@@ -203,6 +212,7 @@ class Log(val dir: File,
           error("Could not find index file corresponding to log file %s, rebuilding index...".format(segment.log.file.getAbsolutePath))
           segment.recover(config.maxMessageSize)
         }
+        // 保存offset对应的segment
         segments.put(start, segment)
       }
     }
@@ -331,11 +341,13 @@ class Log(val dir: File,
       lock synchronized {
 
         if (assignOffsets) {
+          // 对于每个分区目录，在写入数据的时候，消息的offset是顺序增长的，该分区下，第一条消息的offset=0，后面就是1，依次增长
           // assign offsets to the message set
           val offset = new LongRef(nextOffsetMetadata.messageOffset)
           appendInfo.firstOffset = offset.value
           val now = time.milliseconds
           val (validatedMessages, messageSizesMaybeChanged) = try {
+            // 校验数据并重新分配每条消息的offset，使用nextOffsetMetadata进行递增
             validMessages.validateMessagesAndAssignOffsets(offset,
                                                            now,
                                                            appendInfo.sourceCodec,
@@ -348,6 +360,7 @@ class Log(val dir: File,
             case e: IOException => throw new KafkaException("Error in validating messages while appending to log '%s'".format(name), e)
           }
           validMessages = validatedMessages
+          // 最后一条数据的offset
           appendInfo.lastOffset = offset.value - 1
           if (config.messageTimestampType == TimestampType.LOG_APPEND_TIME)
             appendInfo.timestamp = now
@@ -379,18 +392,23 @@ class Log(val dir: File,
             .format(validMessages.sizeInBytes, config.segmentSize))
         }
 
+        // segment的默认大小是1g，如果说写满了，那么就需要重新创建新的segment file
         // maybe roll the log if this segment is full
         val segment = maybeRoll(validMessages.sizeInBytes)
 
+        // 写入数据到segment中去
         // now append to the log
         segment.append(appendInfo.firstOffset, validMessages)
 
+        // 更新Leo
         // increment the log end offset
         updateLogEndOffset(appendInfo.lastOffset + 1)
 
         trace("Appended message set to log %s with first offset: %d, next offset: %d, and messages: %s"
           .format(this.name, appendInfo.firstOffset, nextOffsetMetadata.messageOffset, validMessages))
 
+        // 是否需要将PageCache中的数据刷入磁盘，默认kafka是不刷的，而是由操作系统的flusher线程自行刷磁盘
+        // kafka保证数据不会丢呢，是通过多副本来保证的
         if (unflushedMessages >= config.flushInterval)
           flush()
 
@@ -616,6 +634,9 @@ class Log(val dir: File,
    */
   private def maybeRoll(messagesSize: Int): LogSegment = {
     val segment = activeSegment
+    // segment大小不够了
+    // segment设置了滚动interval，默认是没有的
+    // 索引文件写满了
     if (segment.size > config.segmentSize - messagesSize ||
         segment.size > 0 && time.milliseconds - segment.created > config.segmentMs - segment.rollJitterMs ||
         segment.index.isFull) {
@@ -641,8 +662,11 @@ class Log(val dir: File,
   def roll(): LogSegment = {
     val start = time.nanoseconds
     lock synchronized {
+      // 当前的leo
       val newOffset = logEndOffset
+      // 新segment的log文件，上一个segment的LEO作为新log文件的文件名
       val logFile = logFilename(dir, newOffset)
+      // 新segment的index文件
       val indexFile = indexFilename(dir, newOffset)
       for(file <- List(logFile, indexFile); if file.exists) {
         warn("Newly rolled segment file " + file.getName + " already exists; deleting it first")
@@ -656,6 +680,7 @@ class Log(val dir: File,
           entry.getValue.log.trim()
         }
       }
+      // 创建新的segment
       val segment = new LogSegment(dir,
                                    startOffset = newOffset,
                                    indexIntervalBytes = config.indexInterval,

@@ -548,9 +548,13 @@ class ByteBufferMessageSet(val buffer: ByteBuffer) extends MessageSet with Loggi
     var messagePosition = 0
     buffer.mark()
     while (messagePosition < sizeInBytes - MessageSet.LogOverhead) {
+      // 当前指针设置为0
       buffer.position(messagePosition)
+      // 设置该条数据的offset，在一个partition上，offset是从0开始递增的
       buffer.putLong(offsetCounter.getAndIncrement())
+      // 获取该条消息体的总长度
       val messageSize = buffer.getInt()
+      // 截取后面的byteBuffer
       val messageBuffer = buffer.slice()
       messageBuffer.limit(messageSize)
       val message = new Message(messageBuffer)
@@ -563,6 +567,7 @@ class ByteBufferMessageSet(val buffer: ByteBuffer) extends MessageSet with Loggi
           Utils.writeUnsignedInt(message.buffer, Message.CrcOffset, message.computeChecksum)
         }
       }
+      // 下一条消息的起始位置
       messagePosition += MessageSet.LogOverhead + messageSize
     }
     buffer.reset()

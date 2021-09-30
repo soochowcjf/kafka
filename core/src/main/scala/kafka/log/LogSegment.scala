@@ -77,11 +77,16 @@ class LogSegment(val log: FileMessageSet,
   def append(offset: Long, messages: ByteBufferMessageSet) {
     if (messages.sizeInBytes > 0) {
       trace("Inserting %d bytes at offset %d at position %d".format(messages.sizeInBytes, offset, log.sizeInBytes()))
+
+      // indexIntervalBytes默认4096字节，4k
+      // 如果log文件写了4k数据之后呢，就需要写一条索引，稀疏索引
       // append an entry to the index (if needed)
       if(bytesSinceLastIndexEntry > indexIntervalBytes) {
+        // 写.index文件，底层基于mmap
         index.append(offset, log.sizeInBytes())
         this.bytesSinceLastIndexEntry = 0
       }
+      // 写.log文件，底层基于fileChannel
       // append the messages
       log.append(messages)
       this.bytesSinceLastIndexEntry += messages.sizeInBytes

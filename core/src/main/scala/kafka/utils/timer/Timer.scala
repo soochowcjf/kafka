@@ -53,8 +53,11 @@ trait Timer {
 
 @threadsafe
 class SystemTimer(executorName: String,
+                 // 1ms
                   tickMs: Long = 1,
+                 // 时间轮的大小是20
                   wheelSize: Int = 20,
+                 // 开始时间
                   startMs: Long = System.currentTimeMillis) extends Timer {
 
   // timeout timer
@@ -63,6 +66,7 @@ class SystemTimer(executorName: String,
       Utils.newThread("executor-"+executorName, runnable, false)
   })
 
+  // 延迟队列
   private[this] val delayQueue = new DelayQueue[TimerTaskList]()
   private[this] val taskCounter = new AtomicInteger(0)
   private[this] val timingWheel = new TimingWheel(

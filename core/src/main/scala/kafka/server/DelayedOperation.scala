@@ -35,6 +35,9 @@ import com.yammer.metrics.core.Gauge
 
 
 /**
+ * 1、leader处理发送请求时，需要其它副本都同步了数据
+ * 2、fetch请求需要等待指定数据返回
+ *
  * An operation whose processing needs to be delayed for at most the given delayMs. For example
  * a delayed produce operation could be waiting for specified number of acks; or
  * a delayed fetch operation could be waiting for a given number of bytes to accumulate.
@@ -58,7 +61,7 @@ abstract class DelayedOperation(override val delayMs: Long) extends TimerTask wi
    * 1. The operation has been verified to be completable inside tryComplete()
    * 2. The operation has expired and hence needs to be completed right now
    *
-   * Return true iff the operation is completed by the caller: note that
+   * Return true if the operation is completed by the caller: note that
    * concurrent threads can try to complete the same operation, but only
    * the first thread will succeed in completing the operation and return
    * true, others will still return false
@@ -93,7 +96,7 @@ abstract class DelayedOperation(override val delayMs: Long) extends TimerTask wi
   /*
    * Try to complete the delayed operation by first checking if the operation
    * can be completed by now. If yes execute the completion logic by calling
-   * forceComplete() and return true iff forceComplete returns true; otherwise return false
+   * forceComplete() and return true if forceComplete returns true; otherwise return false
    *
    * This function needs to be defined in subclasses
    */
@@ -120,6 +123,7 @@ object DelayedOperationPurgatory {
 }
 
 /**
+ * 一个辅助类，用于记录超时延迟操作和过期超时操作。
  * A helper purgatory class for bookkeeping delayed operations with a timeout, and expiring timed out operations.
  */
 class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: String,
@@ -210,6 +214,7 @@ class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: String,
 
     // if it cannot be completed by now and hence is watched, add to the expire queue also
     if (! operation.isCompleted()) {
+      // 将任务加到时间轮里
       timeoutTimer.add(operation)
       if (operation.isCompleted()) {
         // cancel the timer task
@@ -364,6 +369,8 @@ class DelayedOperationPurgatory[T <: DelayedOperation](purgatoryName: String,
   }
 
   /**
+   * 后台收割者用于过期已超时的延迟操作
+   *
    * A background reaper to expire delayed operations that have timed out
    */
   private class ExpiredOperationReaper extends ShutdownableThread(

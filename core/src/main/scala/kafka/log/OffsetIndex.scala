@@ -70,6 +70,7 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
         raf.setLength(roundToExactMultiple(maxIndexSize, 8))
       }
 
+      // 默认10m
       /* memory-map the file */
       val len = raf.length()
       val idx = raf.getChannel.map(FileChannel.MapMode.READ_WRITE, 0, len)
@@ -207,7 +208,17 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
       require(!isFull, "Attempt to append to a full index (size = " + _entries + ").")
       if (_entries == 0 || offset > _lastOffset) {
         debug("Adding index entry %d => %d to %s.".format(offset, position, _file.getName))
+
+
+        //offset=23322 物理位置=220
+        //offset=23445 物理位置=281
+        //offset=24536 物理位置=335
+
+        // 基于MappedByteBuffer写入到.index磁盘文件
+        // offset对整个分区而言是一个逻辑offset，是一直增加的，baseOffSet是当前这个段的初始值
+        // 这里用的当前offset减去baseOffSet，表示这条数据在当前segment的offset
         mmap.putInt((offset - baseOffset).toInt)
+        // position指的是某条data在当前segment的.log文件的实际的物理位置
         mmap.putInt(position)
         _entries += 1
         _lastOffset = offset

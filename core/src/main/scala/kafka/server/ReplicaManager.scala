@@ -116,18 +116,22 @@ class ReplicaManager(val config: KafkaConfig,
     new Partition(t, p, time, this)
   })
   private val replicaStateChangeLock = new Object
+  // 副本拉取管理组件
   val replicaFetcherManager = new ReplicaFetcherManager(config, this, metrics, jTime, threadNamePrefix)
   private val highWatermarkCheckPointThreadStarted = new AtomicBoolean(false)
   val highWatermarkCheckpoints = config.logDirs.map(dir => (new File(dir).getAbsolutePath, new OffsetCheckpoint(new File(dir, ReplicaManager.HighWatermarkFilename)))).toMap
   private var hwThreadInitialized = false
   this.logIdent = "[Replica Manager on Broker " + localBrokerId + "]: "
   val stateChangeLogger = KafkaController.stateChangeLogger
+  // ISR 列表
   private val isrChangeSet: mutable.Set[TopicAndPartition] = new mutable.HashSet[TopicAndPartition]()
   private val lastIsrChangeMs = new AtomicLong(System.currentTimeMillis())
   private val lastIsrPropagationMs = new AtomicLong(System.currentTimeMillis())
 
+  // 时间轮任务调度，默认1s
   val delayedProducePurgatory = DelayedOperationPurgatory[DelayedProduce](
     purgatoryName = "Produce", config.brokerId, config.producerPurgatoryPurgeIntervalRequests)
+  // 默认1s
   val delayedFetchPurgatory = DelayedOperationPurgatory[DelayedFetch](
     purgatoryName = "Fetch", config.brokerId, config.fetchPurgatoryPurgeIntervalRequests)
 
@@ -326,8 +330,17 @@ class ReplicaManager(val config: KafkaConfig,
                      messagesPerPartition: Map[TopicPartition, MessageSet],
                      responseCallback: Map[TopicPartition, PartitionResponse] => Unit) {
 
+    // 这里说明一下，每一个客户端在发送数据时，在每次请求（ClientRequest）中，每个topicPartition只会有一个batch发送过来，一个batch中，对应着多个message，其实就是这里的MessageSet
+    // 但是客户端可能会在多次请求（ClientRequest）后，就会有一种情况，同一个topicPartition发了多个batch到服务端，还没有收到响应，kafka客户端默认是最多5个batch没有收到响应
+    // 但是kafka服务端的处理逻辑是，每次处理只会处理一个topicPartition的batch，处理完，再继续处理下一个
+    // 回调函数的结构：每个TopicPartition对应一个PartitionResponse
+    // 每个响应中，包含对一个分区磁盘文件的数据写入的结果
+
     if (isValidRequiredAcks(requiredAcks)) {
       val sTime = SystemTime.milliseconds
+
+      // 写本地os cache
+      // localProduceResults封装了，每个TopicPartition对应的写入响应结果
       val localProduceResults = appendToLocalLog(internalTopicsAllowed, messagesPerPartition, requiredAcks)
       debug("Produce to local log in %d ms".format(SystemTime.milliseconds - sTime))
 
@@ -341,6 +354,7 @@ class ReplicaManager(val config: KafkaConfig,
       if (delayedRequestRequired(requiredAcks, messagesPerPartition, localProduceResults)) {
         // create delayed produce operation
         val produceMetadata = ProduceMetadata(requiredAcks, produceStatus)
+        // 创建延时任务，该任务会等待其它副本都同步了leader的数据后返回，否则就超时返回
         val delayedProduce = new DelayedProduce(timeout, produceMetadata, this, responseCallback)
 
         // create a list of (topic, partition) pairs to use as keys for this delayed produce operation
@@ -382,6 +396,9 @@ class ReplicaManager(val config: KafkaConfig,
   }
 
   private def isValidRequiredAcks(requiredAcks: Short): Boolean = {
+    // 0 不需要等待服务端响应
+    // 1 leader写成功就行
+    // -1 ISR列表中所有的replica都必须写入成功
     requiredAcks == -1 || requiredAcks == 1 || requiredAcks == 0
   }
 
@@ -406,6 +423,7 @@ class ReplicaManager(val config: KafkaConfig,
           val partitionOpt = getPartition(topicPartition.topic, topicPartition.partition)
           val info = partitionOpt match {
             case Some(partition) =>
+              // 将数据写入分区
               partition.appendMessagesToLeader(messages.asInstanceOf[ByteBufferMessageSet], requiredAcks)
             case None => throw new UnknownTopicOrPartitionException("Partition %s doesn't exist on %d"
               .format(topicPartition, localBrokerId))
@@ -425,6 +443,7 @@ class ReplicaManager(val config: KafkaConfig,
 
           trace("%d bytes written to log %s-%d beginning at offset %d and ending at offset %d"
             .format(messages.sizeInBytes, topicPartition.topic, topicPartition.partition, info.firstOffset, info.lastOffset))
+          // 写入的结果
           (topicPartition, LogAppendResult(info))
         } catch {
           // NOTE: Failed produce requests metric is not incremented for known exceptions

@@ -86,6 +86,7 @@ class DelayedProduce(delayMs: Long,
         .format(topicAndPartition, status))
       // skip those partitions that have already been satisfied
       if (status.acksPending) {
+        // 查看其它副本是否已经同步数据了
         val partitionOpt = replicaManager.getPartition(topicAndPartition.topic, topicAndPartition.partition)
         val (hasEnough, errorCode) = partitionOpt match {
           case Some(partition) =>
@@ -106,10 +107,12 @@ class DelayedProduce(delayMs: Long,
       }
     }
 
+    // 每个batch副本都已经同步了数据
     // check if each partition has satisfied at lease one of case A and case B
-    if (! produceMetadata.produceStatus.values.exists(p => p.acksPending))
+    if (! produceMetadata.produceStatus.values.exists(p => p.acksPending)) {
+      // 执行回调
       forceComplete()
-    else
+    } else
       false
   }
 

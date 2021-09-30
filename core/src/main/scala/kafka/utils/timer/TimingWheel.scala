@@ -99,9 +99,12 @@ import java.util.concurrent.atomic.AtomicInteger
 @nonthreadsafe
 private[timer] class TimingWheel(tickMs: Long, wheelSize: Int, startMs: Long, taskCounter: AtomicInteger, queue: DelayQueue[TimerTaskList]) {
 
+  // 时间轮的时间跨度
   private[this] val interval = tickMs * wheelSize
+  // 时间轮的桶数
   private[this] val buckets = Array.tabulate[TimerTaskList](wheelSize) { _ => new TimerTaskList(taskCounter) }
 
+  // 当前时间走到哪一个时间窗口格子上了
   private[this] var currentTime = startMs - (startMs % tickMs) // rounding down to multiple of tickMs
 
   // overflowWheel can potentially be updated and read by two concurrent threads through add().
@@ -112,8 +115,11 @@ private[timer] class TimingWheel(tickMs: Long, wheelSize: Int, startMs: Long, ta
     synchronized {
       if (overflowWheel == null) {
         overflowWheel = new TimingWheel(
+          // 第二个时间轮的tickMs=20ms
           tickMs = interval,
+          // 时间轮的大小还是20
           wheelSize = wheelSize,
+          // 0
           startMs = currentTime,
           taskCounter = taskCounter,
           queue
@@ -126,17 +132,26 @@ private[timer] class TimingWheel(tickMs: Long, wheelSize: Int, startMs: Long, ta
     val expiration = timerTaskEntry.expirationMs
 
     if (timerTaskEntry.cancelled) {
+      // 任务被取消了
       // Cancelled
       false
     } else if (expiration < currentTime + tickMs) {
+      // 过期时间 < 当前时间 + 一个格子的时间大小
       // Already expired
       false
+
     } else if (expiration < currentTime + interval) {
+      // 过期时间 < 当前时间 + 当前时间轮的跨度
+      // 说明这个任务可以存放在当前时间轮上
+      // （比如说当前任务的timeout=62ms，当前是第二个时间轮，interval=400ms）
+
       // Put in its own bucket
+      // 找到所在时间轮的格子，将任务挂载到该格子上的任务列表上去，62ms的任务就会在第三个桶上，（virtualId=62/20=3 ; 3%20=3）
       val virtualId = expiration / tickMs
       val bucket = buckets((virtualId % wheelSize.toLong).toInt)
       bucket.add(timerTaskEntry)
 
+      // 设置该桶的过期时间，（62ms的任务的超时时间就是3*20=60ms）
       // Set the bucket expiration time
       if (bucket.setExpiration(virtualId * tickMs)) {
         // The bucket needs to be enqueued because it was an expired bucket
@@ -148,17 +163,27 @@ private[timer] class TimingWheel(tickMs: Long, wheelSize: Int, startMs: Long, ta
       }
       true
     } else {
+      // 新增一个父级时间轮，将任务加进去，（比如说当前tickMs=1ms，interval=20ms，wheelSize=20，currentTime=0ms，假设基准时间戳为0）
+      // 这个任务的timeout=62ms，就会走到这个逻辑分支，新增一个时间轮
       // Out of the interval. Put it into the parent timer
       if (overflowWheel == null) addOverflowWheel()
       overflowWheel.add(timerTaskEntry)
     }
   }
 
+  // 尝试推进时间轮
   // Try to advance the clock
   def advanceClock(timeMs: Long): Unit = {
+    // 如果过期时间 > 当前时间 + 每格的时间
+    // 第一层：（60>0+1）
+    // 第二层：（60>0+20）
     if (timeMs >= currentTime + tickMs) {
+      // 当前时间 = 过期时间 - 已经过期格子的时间
+      // 第一层： currentTime=60-0=60
+      // 第二层： currentTime=60-60%20=60
       currentTime = timeMs - (timeMs % tickMs)
 
+      // 尝试推进父级时间轮
       // Try to advance the clock of the overflow wheel if present
       if (overflowWheel != null) overflowWheel.advanceClock(currentTime)
     }

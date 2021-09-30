@@ -51,6 +51,7 @@ class Partition(val topic: String,
   private val leaderIsrUpdateLock = new ReentrantReadWriteLock()
   private var zkVersion: Int = LeaderAndIsr.initialZKVersion
   @volatile private var leaderEpoch: Int = LeaderAndIsr.initialLeaderEpoch - 1
+  // 这个partition的leader节点
   @volatile var leaderReplicaIdOpt: Option[Int] = None
   @volatile var inSyncReplicas: Set[Replica] = Set.empty[Replica]
 
@@ -425,22 +426,29 @@ class Partition(val topic: String,
 
   def appendMessagesToLeader(messages: ByteBufferMessageSet, requiredAcks: Int = 0) = {
     val (info, leaderHWIncremented) = inReadLock(leaderIsrUpdateLock) {
+      // 正常呢，这里应该就是leader副本，因为客户端在发送的时候就是发送到leader节点的
       val leaderReplicaOpt = leaderReplicaIfLocal()
       leaderReplicaOpt match {
         case Some(leaderReplica) =>
+          // 获取该leader副本对应的log组件
           val log = leaderReplica.log.get
           val minIsr = log.config.minInSyncReplicas
           val inSyncSize = inSyncReplicas.size
 
+          // 如果当前ISR列表的大小 < 配置的最小值 && 需要acks=-1需要所有副本都写成功
           // Avoid writing to leader if there are not enough insync replicas to make it safe
           if (inSyncSize < minIsr && requiredAcks == -1) {
             throw new NotEnoughReplicasException("Number of insync replicas for partition [%s,%d] is [%d], below required minimum [%d]"
               .format(topic, partitionId, inSyncSize, minIsr))
           }
 
+          // 写入数据
           val info = log.append(messages, assignOffsets = true)
+          // 如果有一些fetch请求,如果没有数据写入，那么就会阻塞等待一会儿，
+          // 这时候，如果有数据写入，LEO增加了，那么就需要尝试去唤醒fetch请求
           // probably unblock some follower fetch requests since log end offset has been updated
           replicaManager.tryCompleteDelayedFetch(new TopicPartitionOperationKey(this.topic, this.partitionId))
+          // 如果ISR列表下降至只有一个副本的话，那么我们就需要更新HW
           // we may need to increment high watermark since ISR could be down to 1
           (info, maybeIncrementLeaderHW(leaderReplica))
 
@@ -450,6 +458,7 @@ class Partition(val topic: String,
       }
     }
 
+    // 如果说，ISR列表下降至为1的话，说明只要写leader成功就算成功了，那么request就不需要等待响应了
     // some delayed operations may be unblocked after HW changed
     if (leaderHWIncremented)
       tryCompleteDelayedRequests()
