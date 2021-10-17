@@ -189,10 +189,11 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
         config.brokerId =  getBrokerId
         this.logIdent = "[Kafka Server " + config.brokerId + "], "
 
+        // 网络通信组件
         socketServer = new SocketServer(config, metrics, kafkaMetricsTime)
         socketServer.startup()
 
-        // 同步组件
+        // 副本管理组件
         /* start replica manager */
         replicaManager = new ReplicaManager(config, metrics, time, kafkaMetricsTime, zkUtils, kafkaScheduler, logManager,
           isShuttingDown)

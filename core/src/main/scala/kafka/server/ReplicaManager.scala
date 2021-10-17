@@ -128,10 +128,10 @@ class ReplicaManager(val config: KafkaConfig,
   private val lastIsrChangeMs = new AtomicLong(System.currentTimeMillis())
   private val lastIsrPropagationMs = new AtomicLong(System.currentTimeMillis())
 
-  // 时间轮任务调度，默认1s
+  // produce延迟时间轮，默认1s
   val delayedProducePurgatory = DelayedOperationPurgatory[DelayedProduce](
     purgatoryName = "Produce", config.brokerId, config.producerPurgatoryPurgeIntervalRequests)
-  // 默认1s
+  // fetch延迟时间轮，默认1s
   val delayedFetchPurgatory = DelayedOperationPurgatory[DelayedFetch](
     purgatoryName = "Fetch", config.brokerId, config.fetchPurgatoryPurgeIntervalRequests)
 
@@ -331,8 +331,8 @@ class ReplicaManager(val config: KafkaConfig,
                      responseCallback: Map[TopicPartition, PartitionResponse] => Unit) {
 
     // 这里说明一下，每一个客户端在发送数据时，在每次请求（ClientRequest）中，每个topicPartition只会有一个batch发送过来，一个batch中，对应着多个message，其实就是这里的MessageSet
-    // 但是客户端可能会在多次请求（ClientRequest）后，就会有一种情况，同一个topicPartition发了多个batch到服务端，还没有收到响应，kafka客户端默认是最多5个batch没有收到响应
-    // 但是kafka服务端的处理逻辑是，每次处理只会处理一个topicPartition的batch，处理完，再继续处理下一个
+    // 但是客户端可能会在多次请求（ClientRequest）后，就会有一种情况，发送了多个request到同一个broker服务端，还没有收到响应，kafka客户端默认是最多5个clientRequest没有收到响应
+    // 但是kafka服务端的处理逻辑是，每次处理只会处理一个clientRequest，处理完，再继续处理下一个
     // 回调函数的结构：每个TopicPartition对应一个PartitionResponse
     // 每个响应中，包含对一个分区磁盘文件的数据写入的结果
 
@@ -347,16 +347,19 @@ class ReplicaManager(val config: KafkaConfig,
       val produceStatus = localProduceResults.map { case (topicPartition, result) =>
         topicPartition ->
                 ProducePartitionStatus(
+                  // LEO
                   result.info.lastOffset + 1, // required offset
                   new PartitionResponse(result.errorCode, result.info.firstOffset, result.info.timestamp)) // response status
       }
 
+      // 配置的acks=-1，即需要所有副本都写入成功，且至少有一个topicPartition有数据写入成功
       if (delayedRequestRequired(requiredAcks, messagesPerPartition, localProduceResults)) {
         // create delayed produce operation
         val produceMetadata = ProduceMetadata(requiredAcks, produceStatus)
         // 创建延时任务，该任务会等待其它副本都同步了leader的数据后返回，否则就超时返回
         val delayedProduce = new DelayedProduce(timeout, produceMetadata, this, responseCallback)
 
+        // 这句话就是在遍历messagesPerPartition，获取key，将topicPartition封装到TopicPartitionOperationKey中
         // create a list of (topic, partition) pairs to use as keys for this delayed produce operation
         val producerRequestKeys = messagesPerPartition.keys.map(new TopicPartitionOperationKey(_)).toSeq
 
@@ -366,6 +369,7 @@ class ReplicaManager(val config: KafkaConfig,
         delayedProducePurgatory.tryCompleteElseWatch(delayedProduce, producerRequestKeys)
 
       } else {
+        // 走到这里的话，说明acks不等于-1，即acks=0 或者 acks=1
         // we can respond immediately
         val produceResponseStatus = produceStatus.mapValues(status => status.responseStatus)
         responseCallback(produceResponseStatus)
@@ -385,9 +389,9 @@ class ReplicaManager(val config: KafkaConfig,
 
   // If all the following conditions are true, we need to put a delayed produce request and wait for replication to complete
   //
-  // 1. required acks = -1
-  // 2. there is data to append
-  // 3. at least one partition append was successful (fewer errors than partitions)
+  // 1. required acks = -1 需要所有副本都写入成功
+  // 2. there is data to append 是有数据需要写入的
+  // 3. at least one partition append was successful (fewer errors than partitions) 有topicPartition数据写入成功
   private def delayedRequestRequired(requiredAcks: Short, messagesPerPartition: Map[TopicPartition, MessageSet],
                                        localProduceResults: Map[TopicPartition, LogAppendResult]): Boolean = {
     requiredAcks == -1 &&
@@ -409,6 +413,7 @@ class ReplicaManager(val config: KafkaConfig,
                                messagesPerPartition: Map[TopicPartition, MessageSet],
                                requiredAcks: Short): Map[TopicPartition, LogAppendResult] = {
     trace("Append [%s] to local log ".format(messagesPerPartition))
+    // 遍历每个topicPartition的数据，对每个topicPartition的数据执行写入逻辑，如果有异常的话，封装成错误响应
     messagesPerPartition.map { case (topicPartition, messages) =>
       BrokerTopicStats.getBrokerTopicStats(topicPartition.topic).totalProduceRequestRate.mark()
       BrokerTopicStats.getBrokerAllTopicsStats().totalProduceRequestRate.mark()
@@ -423,7 +428,7 @@ class ReplicaManager(val config: KafkaConfig,
           val partitionOpt = getPartition(topicPartition.topic, topicPartition.partition)
           val info = partitionOpt match {
             case Some(partition) =>
-              // 将数据写入分区
+              // 将该topicPartition对应的数据写入分区
               partition.appendMessagesToLeader(messages.asInstanceOf[ByteBufferMessageSet], requiredAcks)
             case None => throw new UnknownTopicOrPartitionException("Partition %s doesn't exist on %d"
               .format(topicPartition, localBrokerId))
@@ -483,14 +488,17 @@ class ReplicaManager(val config: KafkaConfig,
     val fetchOnlyFromLeader: Boolean = replicaId != Request.DebuggingConsumerId
     val fetchOnlyCommitted: Boolean = ! Request.isValidBrokerId(replicaId)
 
+    // 副本同步的话，fetchOnlyFromLeader=true，fetchOnlyCommitted=false
     // read from local logs
     val logReadResults = readFromLocalLog(fetchOnlyFromLeader, fetchOnlyCommitted, fetchInfo)
 
+    // 更新某个broker副本的leo
     // if the fetch comes from the follower,
     // update its corresponding log end offset
     if(Request.isValidBrokerId(replicaId))
       updateFollowerLogReadResults(replicaId, logReadResults)
 
+    // 校验fetch请求，是否可以立即返回
     // check if this fetch request can be satisfied right away
     val bytesReadable = logReadResults.values.map(_.info.messageSet.sizeInBytes).sum
     val errorReadingData = logReadResults.values.foldLeft(false) ((errorIncurred, readResult) =>
@@ -505,6 +513,8 @@ class ReplicaManager(val config: KafkaConfig,
         FetchResponsePartitionData(result.errorCode, result.hw, result.info.messageSet))
       responseCallback(fetchPartitionData)
     } else {
+      // 构建延时任务，加入时间轮
+
       // construct the fetch results from the read results
       val fetchPartitionStatus = logReadResults.map { case (topicAndPartition, result) =>
         (topicAndPartition, FetchPartitionStatus(result.info.fetchOffsetMetadata, fetchInfo.get(topicAndPartition).get))
@@ -529,6 +539,7 @@ class ReplicaManager(val config: KafkaConfig,
                        readOnlyCommitted: Boolean,
                        readPartitionInfo: Map[TopicAndPartition, PartitionFetchInfo]): Map[TopicAndPartition, LogReadResult] = {
 
+    // 遍历每个partition
     readPartitionInfo.map { case (TopicAndPartition(topic, partition), PartitionFetchInfo(offset, fetchSize)) =>
       BrokerTopicStats.getBrokerTopicStats(topic).totalFetchRequestRate.mark()
       BrokerTopicStats.getBrokerAllTopicsStats().totalFetchRequestRate.mark()
@@ -538,15 +549,21 @@ class ReplicaManager(val config: KafkaConfig,
           trace("Fetching log segment for topic %s, partition %d, offset %d, size %d".format(topic, partition, offset, fetchSize))
 
           // decide whether to only fetch from leader
-          val localReplica = if (fetchOnlyFromLeader)
+          val localReplica = if (fetchOnlyFromLeader) {
+            // 走这个逻辑分支
             getLeaderReplicaIfLocal(topic, partition)
-          else
+          } else
             getReplicaOrException(topic, partition)
 
+          // 是否仅拉取已提交的数据，也就是offset处于hw下的数据
+          // 我这里猜测呢，如果是副本同步数据呢，那么这个readOnlyCommitted就是false，
+          // 如果是消费数据呢，那么readOnlyCommitted就是true
+
           // decide whether to only fetch committed data (i.e. messages below high watermark)
-          val maxOffsetOpt = if (readOnlyCommitted)
+          val maxOffsetOpt = if (readOnlyCommitted) {
+            // 高水位hw
             Some(localReplica.highWatermark.messageOffset)
-          else
+          } else
             None
 
           /* Read the LogOffsetMetadata prior to performing the read from the log.
@@ -755,11 +772,17 @@ class ReplicaManager(val config: KafkaConfig,
    * Make the current broker to become follower for a given set of partitions by:
    *
    * 1. Remove these partitions from the leader partitions set.
+   * 将这些partitions从leader partitions中移除
    * 2. Mark the replicas as followers so that no more data can be added from the producer clients.
+   * 标志这些副本为follower节点，这样客户端就不能写数据了
    * 3. Stop fetchers for these partitions so that no more data can be added by the replica fetcher threads.
+   * 停止这些partitions的fetcher线程，防止fetcher线程继续拉数据
    * 4. Truncate the log and checkpoint offsets for these partitions.
+   * truncate log和checkpoint文件
    * 5. Clear the produce and fetch requests in the purgatory
+   * 清除时间轮中的produce和fetch请求
    * 6. If the broker is not shutting down, add the fetcher to the new leaders.
+   * 添加fetcher线程
    *
    * The ordering of doing these steps make sure that the replicas in transition will not
    * take any more messages before checkpointing offsets so that all messages before the checkpoint
@@ -781,6 +804,7 @@ class ReplicaManager(val config: KafkaConfig,
         .format(localBrokerId, correlationId, controllerId, epoch, TopicAndPartition(state._1.topic, state._1.partitionId)))
     }
 
+    // 定义默认错误码
     for (partition <- partitionState.keys)
       responseMap.put(new TopicPartition(partition.topic, partition.partitionId), Errors.NONE.code)
 
@@ -788,12 +812,15 @@ class ReplicaManager(val config: KafkaConfig,
 
     try {
 
+      // 遍历所有的partition
       // TODO: Delete leaders from LeaderAndIsrRequest
       partitionState.foreach{ case (partition, partitionStateInfo) =>
+        // 这个topic的leader节点的broker id
         val newLeaderBrokerId = partitionStateInfo.leader
         metadataCache.getAliveBrokers.find(_.id == newLeaderBrokerId) match {
           // Only change partition state when the leader is available
           case Some(leaderBroker) =>
+            // 设置该partition的follower们
             if (partition.makeFollower(controllerId, partitionStateInfo, correlationId))
               partitionsToMakeFollower += partition
             else
@@ -814,6 +841,7 @@ class ReplicaManager(val config: KafkaConfig,
         }
       }
 
+      // 移除这些partition的fetcher线程
       replicaFetcherManager.removeFetcherForPartitions(partitionsToMakeFollower.map(new TopicAndPartition(_)))
       partitionsToMakeFollower.foreach { partition =>
         stateChangeLogger.trace(("Broker %d stopped fetchers as part of become-follower request from controller " +
@@ -880,7 +908,9 @@ class ReplicaManager(val config: KafkaConfig,
 
   private def updateFollowerLogReadResults(replicaId: Int, readResults: Map[TopicAndPartition, LogReadResult]) {
     debug("Recording follower broker %d log read results: %s ".format(replicaId, readResults))
+    // 循环遍历响应结果
     readResults.foreach { case (topicAndPartition, readResult) =>
+      // 每个partition
       getPartition(topicAndPartition.topic, topicAndPartition.partition) match {
         case Some(partition) =>
           partition.updateReplicaLogReadResult(replicaId, readResult)

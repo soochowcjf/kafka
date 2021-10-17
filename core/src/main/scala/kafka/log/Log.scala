@@ -516,10 +516,13 @@ class Log(val dir: File,
     // Because we don't use lock for reading, the synchronization is a little bit tricky.
     // We create the local variables to avoid race conditions with updates to the log.
     val currentNextOffsetMetadata = nextOffsetMetadata
+    // leo
     val next = currentNextOffsetMetadata.messageOffset
+    // 如果当前topicPartition的leo等于需要拉取的offset，那么就说明没有数据可以拉取，返回empty
     if(startOffset == next)
       return FetchDataInfo(currentNextOffsetMetadata, MessageSet.Empty)
 
+    // 取小于或者等于startOffset的最大的segment
     var entry = segments.floorEntry(startOffset)
 
     // attempt to read beyond the log end offset is an error
@@ -535,18 +538,25 @@ class Log(val dir: File,
       // cause OffsetOutOfRangeException. To solve that, we cap the reading up to exposed position instead of the log
       // end of the active segment.
       val maxPosition = {
+        // 如果拉取的是当前正处于active的segment，即数据正在被写入的segment，正常大部分的情况，也是这种情况
         if (entry == segments.lastEntry) {
+          // 当前当前写入segment的实际物理位置
           val exposedPos = nextOffsetMetadata.relativePositionInSegment.toLong
+          // 如果出现了segment roll的情况，即之前的segment被写满了
           // Check the segment again in case a new segment has just rolled out.
-          if (entry != segments.lastEntry)
+          if (entry != segments.lastEntry) {
+            // 最大值，就是之前segment最大的实际物理位置
             // New log segment has rolled out, we can read up to the file end.
             entry.getValue.size
-          else
+          } else {
+            // 就是当前被写入的segment的实际物理位置
             exposedPos
+          }
         } else {
           entry.getValue.size
         }
       }
+      // 从segment中进行读取,副本同步的话，maxOffset=none
       val fetchInfo = entry.getValue.read(startOffset, maxOffset, maxLength, maxPosition)
       if(fetchInfo == null) {
         entry = segments.higherEntry(entry.getKey)
@@ -634,7 +644,7 @@ class Log(val dir: File,
    */
   private def maybeRoll(messagesSize: Int): LogSegment = {
     val segment = activeSegment
-    // segment大小不够了
+    // segment大小不够了，默认是1g
     // segment设置了滚动interval，默认是没有的
     // 索引文件写满了
     if (segment.size > config.segmentSize - messagesSize ||

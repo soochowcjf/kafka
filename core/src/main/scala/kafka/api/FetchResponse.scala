@@ -275,6 +275,7 @@ class FetchResponseSend(val dest: String, val fetchResponse: FetchResponse) exte
   buffer.rewind()
 
   private val sends = new MultiSend(dest, JavaConversions.seqAsJavaList(fetchResponse.dataGroupedByTopic.toList.map {
+    // 每个topic对应的响应数据
     case(topic, data) => new TopicDataSend(dest, TopicData(topic,
                                                      data.map{case(topicAndPartition, message) => (topicAndPartition.partition, message)}))
     }))

@@ -135,12 +135,15 @@ class OffsetIndex(@volatile private[this] var _file: File, val baseOffset: Long,
   def lookup(targetOffset: Long): OffsetPosition = {
     maybeLock(lock) {
       val idx = mmap.duplicate
+      // 二分查找定位到索引文件的某个slot上去，每个slot是占8字节，前4字节是offset的差值，后4字节是消息在该segment的实际物理位置
       val slot = indexSlotFor(idx, targetOffset)
       if(slot == -1)
         OffsetPosition(baseOffset, 0)
-      else
+      else {
+        // 起始消息的offset，物理位置
         OffsetPosition(baseOffset + relativeOffset(idx, slot), physical(idx, slot))
       }
+    }
   }
   
   /**

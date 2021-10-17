@@ -29,8 +29,12 @@ class Replica(val brokerId: Int,
               time: Time = SystemTime,
               initialHighWatermarkValue: Long = 0L,
               val log: Option[Log] = None) extends Logging {
+  // 高水位，只有在leader副本才会保存
   // the high watermark offset value, in non-leader replicas only its message offsets are kept
   @volatile private[this] var highWatermarkMetadata: LogOffsetMetadata = new LogOffsetMetadata(initialHighWatermarkValue)
+
+  // leo，所有节点都保存
+  // 本地副本，自己更新；远程副本，通过fetch更新
   // the log end offset value, kept in all replicas;
   // for local replica it is the log's end offset, for remote replicas its value is only updated by follower fetch
   @volatile private[this] var logEndOffsetMetadata: LogOffsetMetadata = LogOffsetMetadata.UnknownOffsetMetadata
@@ -50,6 +54,7 @@ class Replica(val brokerId: Int,
   def lastCaughtUpTimeMs = lastCaughtUpTimeMsUnderlying.get()
 
   def updateLogReadResult(logReadResult : LogReadResult) {
+    // 更新该副本的leo，这里fetchOffsetMetadata其实是非leader副本发送过来的拉取的起始offset
     logEndOffset = logReadResult.info.fetchOffsetMetadata
 
     /* If the request read up to the log end offset snapshot when the read was initiated,
@@ -71,11 +76,15 @@ class Replica(val brokerId: Int,
     }
   }
 
-  def logEndOffset =
+  def logEndOffset = {
+    // 如果是本地副本，那么就是由log来负责leo的更新
     if (isLocal)
       log.get.logEndOffsetMetadata
-    else
+    else {
+      // 如果是remote副本，那么就由fetch来更新leo
       logEndOffsetMetadata
+    }
+  }
 
   def highWatermark_=(newHighWatermark: LogOffsetMetadata) {
     if (isLocal) {

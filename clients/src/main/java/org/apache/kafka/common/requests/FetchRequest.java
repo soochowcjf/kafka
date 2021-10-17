@@ -71,6 +71,8 @@ public class FetchRequest extends AbstractRequest {
      */
     public FetchRequest(int replicaId, int maxWait, int minBytes, Map<TopicPartition, PartitionData> fetchData) {
         super(new Struct(CURRENT_SCHEMA));
+        // 按照topic分组，每个topic对应多个topicPartition的数据
+        // <topic,<partitionId,PartitionData>>
         Map<String, Map<Integer, PartitionData>> topicsData = CollectionUtils.groupDataByTopic(fetchData);
 
         struct.set(REPLICA_ID_KEY_NAME, replicaId);
@@ -81,6 +83,7 @@ public class FetchRequest extends AbstractRequest {
             Struct topicData = struct.instance(TOPICS_KEY_NAME);
             topicData.set(TOPIC_KEY_NAME, topicEntry.getKey());
             List<Struct> partitionArray = new ArrayList<Struct>();
+            // partition对应的offset
             for (Map.Entry<Integer, PartitionData> partitionEntry : topicEntry.getValue().entrySet()) {
                 PartitionData fetchPartitionData = partitionEntry.getValue();
                 Struct partitionData = topicData.instance(PARTITIONS_KEY_NAME);

@@ -297,6 +297,7 @@ class ByteBufferMessageSet(val buffer: ByteBuffer) extends MessageSet with Loggi
   def writeFullyTo(channel: GatheringByteChannel): Int = {
     buffer.mark()
     var written = 0
+    // 循环写，必须直到全部写完
     while (written < sizeInBytes)
       written += channel.write(buffer)
     buffer.reset()
@@ -417,6 +418,7 @@ class ByteBufferMessageSet(val buffer: ByteBuffer) extends MessageSet with Loggi
         (convertNonCompressedMessages(offsetCounter, compactedTopic, now, messageTimestampType, messageTimestampDiffMaxMs,
           messageFormatVersion), true)
       } else {
+        // 走这里逻辑
         // Do in-place validation, offset assignment and maybe set timestamp
         (validateNonCompressedMessagesAndAssignOffsetInPlace(offsetCounter, now, compactedTopic, messageTimestampType,
           messageTimestampDiffMaxMs), false)

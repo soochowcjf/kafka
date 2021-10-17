@@ -59,10 +59,13 @@ class DelayedProduce(delayMs: Long,
   // first update the acks pending variable according to the error code
   produceMetadata.produceStatus.foreach { case (topicPartition, status) =>
     if (status.responseStatus.errorCode == Errors.NONE.code) {
+      // 默认的错误码是超时，当acks响应之后会清除该错误码
       // Timeout error state will be cleared when required acks are received
       status.acksPending = true
       status.responseStatus.errorCode = Errors.REQUEST_TIMED_OUT.code
     } else {
+      // 如果错误错误码不为空，就不需要等待副本同步了
+      // 比如说，有的topicPartition没有写入权限，或者说topicPartition写入失败了
       status.acksPending = false
     }
 
@@ -80,6 +83,7 @@ class DelayedProduce(delayMs: Long,
    *   B.2 - Otherwise, set the response with no error.
    */
   override def tryComplete(): Boolean = {
+    // 遍历所有的topicPartition
     // check for each partition if it still has pending acks
     produceMetadata.produceStatus.foreach { case (topicAndPartition, status) =>
       trace("Checking produce satisfaction for %s, current status %s"
@@ -90,6 +94,7 @@ class DelayedProduce(delayMs: Long,
         val partitionOpt = replicaManager.getPartition(topicAndPartition.topic, topicAndPartition.partition)
         val (hasEnough, errorCode) = partitionOpt match {
           case Some(partition) =>
+            // 校验是否足够的副本已经同步了
             partition.checkEnoughReplicasReachOffset(status.requiredOffset)
           case None =>
             // Case A
@@ -106,10 +111,10 @@ class DelayedProduce(delayMs: Long,
         }
       }
     }
-
-    // 每个batch副本都已经同步了数据
+    // 遍历所有topicPartition的响应结果，是否存在acksPending=true的，
+    // 有的话，说明不是所有的topicPartition的副本的hw都追上了leader，没有的话，说明这批消息都已经同步了，可以返回结果了
     // check if each partition has satisfied at lease one of case A and case B
-    if (! produceMetadata.produceStatus.values.exists(p => p.acksPending)) {
+    if (!produceMetadata.produceStatus.values.exists(p => p.acksPending)) {
       // 执行回调
       forceComplete()
     } else

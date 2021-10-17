@@ -102,7 +102,8 @@ abstract class DelayedOperation(override val delayMs: Long) extends TimerTask wi
    */
   def tryComplete(): Boolean
 
-  /*
+  /**
+   * 任务超时，会走这个逻辑
    * run() method defines a task that is executed on timeout
    */
   override def run(): Unit = {

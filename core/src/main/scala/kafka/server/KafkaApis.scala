@@ -328,6 +328,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     val produceRequest = request.body.asInstanceOf[ProduceRequest]
     val numBytesAppended = request.header.sizeOf + produceRequest.sizeOf
 
+    // 授权、未授权的topicPartition对应的map数据
     val (authorizedRequestInfo, unauthorizedRequestInfo) = produceRequest.partitionRecords.asScala.partition {
       case (topicPartition, _) => authorize(request.session, Write, new Resource(Topic, topicPartition.topic))
     }
@@ -335,6 +336,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     // the callback for sending a produce response
     def sendResponseCallback(responseStatus: Map[TopicPartition, PartitionResponse]) {
 
+      // 授权访问的写入结果，合并未授权的topicPartition对应的响应结果
       val mergedResponseStatus = responseStatus ++ unauthorizedRequestInfo.mapValues(_ =>
         new PartitionResponse(Errors.TOPIC_AUTHORIZATION_FAILED.code, -1, Message.NoTimestamp))
 
@@ -399,6 +401,7 @@ class KafkaApis(val requestChannel: RequestChannel,
     else {
       val internalTopicsAllowed = request.header.clientId == AdminUtils.AdminClientId
 
+      // 只发送授权访问的topicPartition的数据
       // Convert ByteBuffer to ByteBufferMessageSet
       val authorizedMessagesPerPartition = authorizedRequestInfo.map {
         case (topicPartition, buffer) => (topicPartition, new ByteBufferMessageSet(buffer))
@@ -425,10 +428,12 @@ class KafkaApis(val requestChannel: RequestChannel,
   def handleFetchRequest(request: RequestChannel.Request) {
     val fetchRequest = request.requestObj.asInstanceOf[FetchRequest]
 
+    // 将授权和未授权的进行分组
     val (authorizedRequestInfo, unauthorizedRequestInfo) = fetchRequest.requestInfo.partition {
       case (topicAndPartition, _) => authorize(request.session, Read, new Resource(Topic, topicAndPartition.topic))
     }
 
+    // 未授权的默认响应
     val unauthorizedPartitionData = unauthorizedRequestInfo.mapValues { _ =>
       FetchResponsePartitionData(Errors.TOPIC_AUTHORIZATION_FAILED.code, -1, MessageSet.Empty)
     }
@@ -459,6 +464,7 @@ class KafkaApis(val requestChannel: RequestChannel,
           }
         } else responsePartitionData
 
+      // 合并授权的响应和未授权响应
       val mergedPartitionData = convertedPartitionData ++ unauthorizedPartitionData
 
       mergedPartitionData.foreach { case (topicAndPartition, data) =>

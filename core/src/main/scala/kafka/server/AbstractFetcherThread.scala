@@ -86,8 +86,10 @@ abstract class AbstractFetcherThread(name: String,
   override def doWork() {
 
     val fetchRequest = inLock(partitionMapLock) {
+      // 构建fetch请求
       val fetchRequest = buildFetchRequest(partitionMap)
       if (fetchRequest.isEmpty) {
+        // 请求体为空，等待
         trace("There are no active partitions. Back off for %d ms before sending a fetch request".format(fetchBackOffMs))
         partitionMapCond.await(fetchBackOffMs, TimeUnit.MILLISECONDS)
       }
@@ -184,6 +186,7 @@ abstract class AbstractFetcherThread(name: String,
   def addPartitions(partitionAndOffsets: Map[TopicAndPartition, Long]) {
     partitionMapLock.lockInterruptibly()
     try {
+      // 为该线程负责的topicPartition 们添加相应的拉取offset
       for ((topicAndPartition, offset) <- partitionAndOffsets) {
         // If the partitionMap already has the topic/partition, then do not update the map with the old offset
         if (!partitionMap.contains(topicAndPartition))

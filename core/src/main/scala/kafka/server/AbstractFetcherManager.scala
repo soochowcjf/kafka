@@ -71,8 +71,15 @@ abstract class AbstractFetcherManager(protected val name: String, clientId: Stri
   // to be defined in subclass to create a specific fetcher
   def createFetcherThread(fetcherId: Int, sourceBroker: BrokerEndPoint): AbstractFetcherThread
 
+  /**
+   * 为在本broker上且是非leader的副本，创建fetcher线程
+   * 将他们按照相应leader副本都是同一个节点进行分组，每一个组创建一个fetcher线程
+   *
+   * @param partitionAndOffsets
+   */
   def addFetcherForPartitions(partitionAndOffsets: Map[TopicAndPartition, BrokerAndInitialOffset]) {
     mapLock synchronized {
+      // 将一批partitions分组，leader副本是同一个broker的分在同一个组中
       val partitionsPerFetcher = partitionAndOffsets.groupBy{ case(topicAndPartition, brokerAndInitialOffset) =>
         BrokerAndFetcherId(brokerAndInitialOffset.broker, getFetcherId(topicAndPartition.topic, topicAndPartition.partition))}
       for ((brokerAndFetcherId, partitionAndOffsets) <- partitionsPerFetcher) {
@@ -80,11 +87,13 @@ abstract class AbstractFetcherManager(protected val name: String, clientId: Stri
         fetcherThreadMap.get(brokerAndFetcherId) match {
           case Some(f) => fetcherThread = f
           case None =>
+            // 一个组创建一个线程，进行数据拉取
             fetcherThread = createFetcherThread(brokerAndFetcherId.fetcherId, brokerAndFetcherId.broker)
             fetcherThreadMap.put(brokerAndFetcherId, fetcherThread)
             fetcherThread.start
         }
 
+        // 添加这个线程需要同步的partition，以及从该partition的哪个offset开始同步数据
         fetcherThreadMap(brokerAndFetcherId).addPartitions(partitionAndOffsets.map { case (topicAndPartition, brokerAndInitOffset) =>
           topicAndPartition -> brokerAndInitOffset.initOffset
         })

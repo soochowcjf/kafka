@@ -61,8 +61,11 @@ class ReplicaFetcherThread(name: String,
     else 0
   private val socketTimeout: Int = brokerConfig.replicaSocketTimeoutMs
   private val replicaId = brokerConfig.brokerId
+  // 500ms
   private val maxWait = brokerConfig.replicaFetchWaitMaxMs
+  // 1字节
   private val minBytes = brokerConfig.replicaFetchMinBytes
+  // 1M
   private val fetchSize = brokerConfig.replicaFetchMaxBytes
 
   private def clientId = name

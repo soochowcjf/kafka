@@ -129,20 +129,26 @@ class FileMessageSet private[kafka](@volatile var file: File,
   def searchFor(targetOffset: Long, startingPosition: Int): OffsetPosition = {
     var position = startingPosition
     val buffer = ByteBuffer.allocate(MessageSet.LogOverhead)
+    // .log文件总共写入的消息的字节数
     val size = sizeInBytes()
     while(position + MessageSet.LogOverhead < size) {
       buffer.rewind()
+      // 从指针position开始读取数据到buffer中，将buffer写满
       channel.read(buffer, position)
       if(buffer.hasRemaining)
         throw new IllegalStateException("Failed to read complete buffer for targetOffset %d startPosition %d in %s"
                                         .format(targetOffset, startingPosition, file.getAbsolutePath))
       buffer.rewind()
+      // 得到这条消息的offset
       val offset = buffer.getLong()
+      // 找的就是这条消息，直接返回
       if(offset >= targetOffset)
         return OffsetPosition(offset, position)
+      // 该条消息的size
       val messageSize = buffer.getInt()
       if(messageSize < Message.MinMessageOverhead)
         throw new IllegalStateException("Invalid message size: " + messageSize)
+      // 继续循环往后面遍历
       position += MessageSet.LogOverhead + messageSize
     }
     null
