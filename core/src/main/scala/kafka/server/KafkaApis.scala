@@ -75,6 +75,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       ApiKeys.forId(request.requestId) match {
         // 处理发送请求
         case ApiKeys.PRODUCE => handleProducerRequest(request)
+        // 处理副本同步fetch请求
         case ApiKeys.FETCH => handleFetchRequest(request)
         case ApiKeys.LIST_OFFSETS => handleOffsetRequest(request)
         case ApiKeys.METADATA => handleTopicMetadataRequest(request)
@@ -479,7 +480,9 @@ class KafkaApis(val requestChannel: RequestChannel,
       def fetchResponseCallback(delayTimeMs: Int) {
         trace(s"Sending fetch response to client ${fetchRequest.clientId} of " +
           s"${convertedPartitionData.values.map(_.messages.sizeInBytes).sum} bytes")
+        // 封装响应请求，内部会按照消息协议格式，封装bytebuffer
         val response = FetchResponse(fetchRequest.correlationId, mergedPartitionData, fetchRequest.versionId, delayTimeMs)
+        // 将该response发送到指定processor对应的响应队列中去
         requestChannel.sendResponse(new RequestChannel.Response(request, new FetchResponseSend(request.connectionId, response)))
       }
 

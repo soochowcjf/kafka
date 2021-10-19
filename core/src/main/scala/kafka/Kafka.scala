@@ -64,6 +64,7 @@ object Kafka extends Logging {
         }
       })
 
+      // kafka服务端启动类
       kafkaServerStartable.startup
       kafkaServerStartable.awaitShutdown
     }

@@ -125,11 +125,15 @@ class ReplicaFetcherThread(name: String,
       if (logger.isTraceEnabled)
         trace("Follower %d has replica log end offset %d for partition %s. Received %d messages and leader hw %d"
           .format(replica.brokerId, replica.logEndOffset.messageOffset, topicAndPartition, messageSet.sizeInBytes, partitionData.highWatermark))
+      // 将数据写入本地磁盘
       replica.log.get.append(messageSet, assignOffsets = false)
       if (logger.isTraceEnabled)
         trace("Follower %d has replica log end offset %d after appending %d bytes of messages for partition %s"
           .format(replica.brokerId, replica.logEndOffset.messageOffset, messageSet.sizeInBytes, topicAndPartition))
+      // 副本的高水位hw，为当前的leo、服务端返回的hw两者取小
       val followerHighWatermark = replica.logEndOffset.messageOffset.min(partitionData.highWatermark)
+
+      // 更新副本的高水位
       // for the follower replica, we do not need to keep
       // its segment base offset the physical position,
       // these values will be computed upon making the leader

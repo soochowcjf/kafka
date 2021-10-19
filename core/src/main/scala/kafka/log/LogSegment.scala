@@ -131,7 +131,7 @@ class LogSegment(val log: FileMessageSet,
       throw new IllegalArgumentException("Invalid max size for log read (%d)".format(maxSize))
 
     val logSize = log.sizeInBytes // this may change, need to save a consistent copy
-    // 找到起始消息的位置（offset+position）
+    // 根据fetch请求的offset，找到起始消息的位置（offset+position）
     val startPosition = translateOffset(startOffset)
 
     // if the start position is already off the end of the log, return null

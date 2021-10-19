@@ -69,17 +69,22 @@ class DelayedFetch(delayMs: Long,
    */
   override def tryComplete() : Boolean = {
     var accumulatedSize = 0
+    // 遍历所有的topicPartition
     fetchMetadata.fetchPartitionStatus.foreach {
       case (topicAndPartition, fetchStatus) =>
         val fetchOffset = fetchStatus.startOffsetMetadata
         try {
           if (fetchOffset != LogOffsetMetadata.UnknownOffsetMetadata) {
             val replica = replicaManager.getLeaderReplicaIfLocal(topicAndPartition.topic, topicAndPartition.partition)
+            // 因为有可能，刚开始fetch的时候，没有消息可以拉取，过了一会儿，有客户端写了一条消息，leader的leo往前移动了，这时候再进行拉取就可以拉取到新消息了
             val endOffset =
-              if (fetchMetadata.fetchOnlyCommitted)
+              if (fetchMetadata.fetchOnlyCommitted) {
+                // 高水位 hw
                 replica.highWatermark
-              else
+              } else {
+                // leo
                 replica.logEndOffset
+              }
 
             // Go directly to the check for Case D if the message offsets are the same. If the log segment
             // has just rolled, then the high watermark offset will remain the same but be on the old segment,
@@ -110,6 +115,7 @@ class DelayedFetch(delayMs: Long,
         }
     }
 
+    // 总的累积的消息字节数已经 超过 最小需要的拉取的字节大小（1字节）
     // Case D
     if (accumulatedSize >= fetchMetadata.fetchMinBytes)
       forceComplete()

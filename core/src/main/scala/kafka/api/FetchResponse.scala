@@ -59,9 +59,13 @@ class PartitionDataSend(val partitionId: Int,
   private var messagesSentSize = 0
   private var pending = false
   private val buffer = ByteBuffer.allocate( 4 /** partitionId **/ + FetchResponsePartitionData.headerSize)
+  // 4字节的partitionId
   buffer.putInt(partitionId)
+  // 2字节的错误码
   buffer.putShort(partitionData.error)
+  // 8字节的hw
   buffer.putLong(partitionData.hw)
+  // 4字节的消息体长度
   buffer.putInt(partitionData.messages.sizeInBytes)
   buffer.rewind()
 
@@ -103,9 +107,12 @@ object TopicData {
     TopicData(topic, Map(topicPartitionDataPairs:_*))
   }
 
-  def headerSize(topic: String) =
+  def headerSize(topic: String) = {
+    // String类型的topic字段的长度
     shortStringLength(topic) +
-    4 /* partition count */
+    // 该topic的partition的数量，占4个字节
+    4
+  } /* partition count */
 }
 
 case class TopicData(topic: String, partitionData: Map[Int, FetchResponsePartitionData]) {
@@ -129,6 +136,7 @@ class TopicDataSend(val dest: String, val topicData: TopicData) extends Send {
 
   override def size = topicData.headerSize + sends.size()
 
+  // topic + partitionLen的长度 string+4
   private val buffer = ByteBuffer.allocate(topicData.headerSize)
   writeShortString(buffer, topicData.topic)
   buffer.putInt(topicData.partitionData.size)
@@ -214,12 +222,15 @@ case class FetchResponse(correlationId: Int,
    * Writes the header of the FetchResponse to the input buffer
    */
   def writeHeaderTo(buffer: ByteBuffer) = {
+    // 总长度
     buffer.putInt(sizeInBytes)
+    // 消息关联id
     buffer.putInt(correlationId)
     // Include the throttleTime only if the client can read it
     if (requestVersion > 0)
       buffer.putInt(throttleTimeMs)
 
+    // topic的数量
     buffer.putInt(dataGroupedByTopic.size) // topic count
   }
   /*
@@ -271,6 +282,7 @@ class FetchResponseSend(val dest: String, val fetchResponse: FetchResponse) exte
 
   // The throttleTimeSize will be 0 if the request was made from a client sending a V0 style request
   private val buffer = ByteBuffer.allocate(4 /* for size */ + fetchResponse.headerSizeInBytes)
+  // 4字节的总长度，4字节的correlation_id，4字节的throttle_time_ms，4字节的topic数量
   fetchResponse.writeHeaderTo(buffer)
   buffer.rewind()
 
@@ -288,6 +300,7 @@ class FetchResponseSend(val dest: String, val fetchResponse: FetchResponse) exte
 
     if (buffer.hasRemaining)
       written += channel.write(buffer)
+    // 如果buffer全部写入channel中去了
     if (!buffer.hasRemaining) {
       if (!sends.completed)
         written += sends.writeTo(channel)

@@ -405,6 +405,7 @@ class Partition(val topic: String,
     val leaderHWIncremented = inWriteLock(leaderIsrUpdateLock) {
       leaderReplicaIfLocal() match {
         case Some(leaderReplica) =>
+          // 获取当前时间戳与最后追赶上leader副本leo的时间戳差值，大于10s的副本
           val outOfSyncReplicas = getOutOfSyncReplicas(leaderReplica, replicaMaxLagTimeMs)
           if(outOfSyncReplicas.size > 0) {
             val newInSyncReplicas = inSyncReplicas -- outOfSyncReplicas
@@ -416,6 +417,7 @@ class Partition(val topic: String,
             // we may need to increment high watermark since ISR could be down to 1
 
             replicaManager.isrShrinkRate.mark()
+            // 尝试更新hw
             maybeIncrementLeaderHW(leaderReplica)
           } else {
             false

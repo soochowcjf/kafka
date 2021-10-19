@@ -219,6 +219,7 @@ class ReplicaManager(val config: KafkaConfig,
 
   def startup() {
     // start ISR expiration thread
+    // 默认10s执行一次
     scheduler.schedule("isr-expiration", maybeShrinkIsr, period = config.replicaLagTimeMaxMs, unit = TimeUnit.MILLISECONDS)
     scheduler.schedule("isr-change-propagation", maybePropagateIsrChanges, period = 2500L, unit = TimeUnit.MILLISECONDS)
   }
@@ -480,6 +481,7 @@ class ReplicaManager(val config: KafkaConfig,
    * the callback function will be triggered either when timeout or required fetch info is satisfied
    */
   def fetchMessages(timeout: Long,
+                   // 这里的replicaId是某个发出fetch请求的某个broker的brokerId
                     replicaId: Int,
                     fetchMinBytes: Int,
                     fetchInfo: immutable.Map[TopicAndPartition, PartitionFetchInfo],
@@ -499,8 +501,11 @@ class ReplicaManager(val config: KafkaConfig,
       updateFollowerLogReadResults(replicaId, logReadResults)
 
     // 校验fetch请求，是否可以立即返回
+
+    // 这次fetch请求读取的总的消息字节数
     // check if this fetch request can be satisfied right away
     val bytesReadable = logReadResults.values.map(_.info.messageSet.sizeInBytes).sum
+    // 读取是否有异常
     val errorReadingData = logReadResults.values.foldLeft(false) ((errorIncurred, readResult) =>
       errorIncurred || (readResult.errorCode != Errors.NONE.code))
 
@@ -519,6 +524,9 @@ class ReplicaManager(val config: KafkaConfig,
       val fetchPartitionStatus = logReadResults.map { case (topicAndPartition, result) =>
         (topicAndPartition, FetchPartitionStatus(result.info.fetchOffsetMetadata, fetchInfo.get(topicAndPartition).get))
       }
+
+      // 副本同步fetch请求
+      // 1字节、true、false、true、fetchPartitionStatus
       val fetchMetadata = FetchMetadata(fetchMinBytes, fetchOnlyFromLeader, fetchOnlyCommitted, isFromFollower, fetchPartitionStatus)
       val delayedFetch = new DelayedFetch(timeout, fetchMetadata, this, responseCallback)
 
@@ -581,6 +589,7 @@ class ReplicaManager(val config: KafkaConfig,
               FetchDataInfo(LogOffsetMetadata.UnknownOffsetMetadata, MessageSet.Empty)
           }
 
+          // 是否fetch请求的offset，已经到达当前的leader的leo了
           val readToEndOfLog = initialLogEndOffset.messageOffset - logReadInfo.fetchOffsetMetadata.messageOffset <= 0
 
           LogReadResult(logReadInfo, localReplica.highWatermark.messageOffset, fetchSize, readToEndOfLog, None)

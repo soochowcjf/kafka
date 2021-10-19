@@ -511,7 +511,7 @@ private[kafka] class Processor(val id: Int,
         val channel = selector.channel(receive.source)
         val session = RequestChannel.Session(new KafkaPrincipal(KafkaPrincipal.USER_TYPE, channel.principal.getName),
           channel.socketAddress)
-          // 解析接收到的数据，将其封装为request
+          // 该方法内部会解析接收到的数据，将其封装为request
         val req = RequestChannel.Request(processor = id, connectionId = receive.source, session = session, buffer = receive.payload, startTimeMs = time.milliseconds, securityProtocol = protocol)
         // 入到请求队列里
         requestChannel.sendRequest(req)

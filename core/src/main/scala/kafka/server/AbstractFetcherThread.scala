@@ -106,6 +106,7 @@ abstract class AbstractFetcherThread(name: String,
 
     try {
       trace("Issuing to broker %d of fetch request %s".format(sourceBroker.id, fetchRequest))
+      // 发送请求给kafka服务端，进行fetch拉取
       responseData = fetch(fetchRequest)
     } catch {
       case t: Throwable =>
@@ -132,6 +133,7 @@ abstract class AbstractFetcherThread(name: String,
               Errors.forCode(partitionData.errorCode) match {
                 case Errors.NONE =>
                   try {
+                    // 数据
                     val messages = partitionData.toByteBufferMessageSet
                     val validBytes = messages.validBytes
                     val newOffset = messages.shallowIterator.toSeq.lastOption match {

@@ -545,7 +545,7 @@ class Log(val dir: File,
           // 如果出现了segment roll的情况，即之前的segment被写满了
           // Check the segment again in case a new segment has just rolled out.
           if (entry != segments.lastEntry) {
-            // 最大值，就是之前segment最大的实际物理位置
+            // 说明之前的segment写满了，最大值就是之前segment最大的实际物理位置
             // New log segment has rolled out, we can read up to the file end.
             entry.getValue.size
           } else {
