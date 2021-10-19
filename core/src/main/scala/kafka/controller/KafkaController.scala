@@ -1161,6 +1161,8 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
     }
 
     /**
+     * 如果与zk的连接断开了，然后重新连接成功了，就会调用到该方法
+     *
      * Called after the zookeeper session has expired and a new session has been created. You would have to re-create
      * any ephemeral nodes here.
      *
@@ -1172,6 +1174,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
       info("ZK expired; shut down all controller components and try to re-elect")
       inLock(controllerContext.controllerLock) {
         onControllerResignation()
+        // 进行选举
         controllerElector.elect
       }
     }
