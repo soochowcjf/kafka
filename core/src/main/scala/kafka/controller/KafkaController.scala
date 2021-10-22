@@ -48,6 +48,7 @@ import kafka.common.TopicAndPartition
 
 class ControllerContext(val zkUtils: ZkUtils,
                         val zkSessionTimeout: Int) {
+  // 和其他所有broker通信的组件
   var controllerChannelManager: ControllerChannelManager = null
   val controllerLock: ReentrantLock = new ReentrantLock()
   var shuttingDownBrokerIds: mutable.Set[Int] = mutable.Set.empty
@@ -55,7 +56,9 @@ class ControllerContext(val zkUtils: ZkUtils,
   var epoch: Int = KafkaController.InitialControllerEpoch - 1
   var epochZkVersion: Int = KafkaController.InitialControllerEpochZkVersion - 1
   var allTopics: Set[String] = Set.empty
+  // topicPartition对应的所有副本
   var partitionReplicaAssignment: mutable.Map[TopicAndPartition, Seq[Int]] = mutable.Map.empty
+  // topicPartition对应的isr
   var partitionLeadershipInfo: mutable.Map[TopicAndPartition, LeaderIsrAndControllerEpoch] = mutable.Map.empty
   val partitionsBeingReassigned: mutable.Map[TopicAndPartition, ReassignedPartitionsContext] = new mutable.HashMap
   val partitionsUndergoingPreferredReplicaElection: mutable.Set[TopicAndPartition] = new mutable.HashSet
@@ -164,6 +167,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   val controllerContext = new ControllerContext(zkUtils, config.zkSessionTimeoutMs)
   // partition状态机
   val partitionStateMachine = new PartitionStateMachine(this)
+  // replica状态机
   val replicaStateMachine = new ReplicaStateMachine(this)
   // controller选举器
   private val controllerElector = new ZookeeperLeaderElector(controllerContext, ZkUtils.ControllerPath, onControllerFailover,
@@ -331,7 +335,9 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
       registerReassignedPartitionsListener()
       registerIsrChangeNotificationListener()
       registerPreferredReplicaElectionListener()
+      // 注册TopicChangeListener topic的变更会回调该监听器
       partitionStateMachine.registerListeners()
+      // 注册BrokerChangeListener broker的变更，新增、宕机都会回调该监听器
       replicaStateMachine.registerListeners()
       initializeControllerContext()
       replicaStateMachine.startup()
@@ -347,6 +353,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
       if (config.autoLeaderRebalanceEnable) {
         info("starting the partition rebalance scheduler")
         autoRebalanceScheduler.startup()
+        // 默认500s，3min执行一次
         autoRebalanceScheduler.schedule("partition-rebalance-thread", checkAndTriggerPartitionRebalance,
           5, config.leaderImbalanceCheckIntervalSeconds.toLong, TimeUnit.SECONDS)
       }
@@ -464,8 +471,10 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
    */
   def onBrokerFailure(deadBrokers: Seq[Int]) {
     info("Broker failure callback for %s".format(deadBrokers.mkString(",")))
-    val deadBrokersThatWereShuttingDown =
+    val deadBrokersThatWereShuttingDown = {
+      // 移除宕机的broker的id
       deadBrokers.filter(id => controllerContext.shuttingDownBrokerIds.remove(id))
+    }
     info("Removed %s from list of shutting down brokers.".format(deadBrokersThatWereShuttingDown))
     val deadBrokersSet = deadBrokers.toSet
     // trigger OfflinePartition state for all partitions whose current leader is one amongst the dead brokers

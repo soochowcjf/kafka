@@ -158,7 +158,9 @@ class ZkUtils(val zkClient: ZkClient,
     getChildren(BrokerIdsPath).map(_.toInt).sorted
 
   def getAllBrokersInCluster(): Seq[Broker] = {
+    // 获取集群中所有的brokerId
     val brokerIds = getChildrenParentMayNotExist(BrokerIdsPath).sorted
+    // 根据brokerId获取所有的broker信息，host port
     brokerIds.map(_.toInt).map(getBrokerInfo(_)).filter(_.isDefined).map(_.get)
   }
 

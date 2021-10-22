@@ -77,6 +77,7 @@ class OfflinePartitionLeaderSelector(controllerContext: ControllerContext, confi
                   " Assigned replicas are: [%s]".format(assignedReplicas))
               case false =>
                 ControllerStats.uncleanLeaderElectionRate.mark()
+                // 选择存活的第一个节点为新leader
                 val newLeader = liveAssignedReplicas.head
                 warn("No broker in ISR is alive for %s. Elect leader %d from live brokers %s. There's potential data loss."
                      .format(topicAndPartition, newLeader, liveAssignedReplicas.mkString(",")))

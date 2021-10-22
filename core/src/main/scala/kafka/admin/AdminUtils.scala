@@ -55,6 +55,7 @@ object AdminUtils extends Logging {
    * 1. Assign the first replica of each partition by round-robin, starting from a random position in the broker list.
    * 2. Assign the remaining replicas of each partition with an increasing shift.
    *
+   * 5个broker，10个partition，3个replica
    * Here is an example of assigning
    * broker-0  broker-1  broker-2  broker-3  broker-4
    * p0        p1        p2        p3        p4       (1st replica)
@@ -66,6 +67,13 @@ object AdminUtils extends Logging {
    *
    * To create rack aware assignment, this API will first create a rack alternated broker list. For example,
    * from this brokerID -> rack mapping:
+   *
+   * broker-0 => 机架1
+   * broker-1 => 机架3
+   * broker-2 => 机架3
+   * broker-3 => 机架2
+   * broker-4 => 机架2
+   * broker-5 => 机架1
    *
    * 0 -> "rack1", 1 -> "rack3", 2 -> "rack3", 3 -> "rack2", 4 -> "rack2", 5 -> "rack1"
    *
@@ -115,6 +123,7 @@ object AdminUtils extends Logging {
       throw new AdminOperationException("replication factor must be larger than 0")
     if (replicationFactor > brokerMetadatas.size)
       throw new AdminOperationException(s"replication factor: $replicationFactor larger than available brokers: ${brokerMetadatas.size}")
+    // 一个机架
     if (brokerMetadatas.forall(_.rack.isEmpty))
       assignReplicasToBrokersRackUnaware(nPartitions, replicationFactor, brokerMetadatas.map(_.id), fixedStartIndex,
         startPartitionId)
@@ -133,14 +142,21 @@ object AdminUtils extends Logging {
                                                  startPartitionId: Int): Map[Int, Seq[Int]] = {
     val ret = mutable.Map[Int, Seq[Int]]()
     val brokerArray = brokerList.toArray
+    // 随机选择一个起始broker位置，假设为0
     val startIndex = if (fixedStartIndex >= 0) fixedStartIndex else rand.nextInt(brokerArray.length)
+    // 0
     var currentPartitionId = math.max(0, startPartitionId)
+    // 副本分配时，位移的长度 假设为0
     var nextReplicaShift = if (fixedStartIndex >= 0) fixedStartIndex else rand.nextInt(brokerArray.length)
+    // 需要分配的partition数
     for (_ <- 0 until nPartitions) {
       if (currentPartitionId > 0 && (currentPartitionId % brokerArray.length == 0))
         nextReplicaShift += 1
+      // 相当于轮询所有的broker来进行分配partition
+      // 该partition的第一个副本所在的brokerId
       val firstReplicaIndex = (currentPartitionId + startIndex) % brokerArray.length
       val replicaBuffer = mutable.ArrayBuffer(brokerArray(firstReplicaIndex))
+      // 每个partition需要分配的副本数，为partition分配副本
       for (j <- 0 until replicationFactor - 1)
         replicaBuffer += brokerArray(replicaIndex(firstReplicaIndex, nextReplicaShift, j, brokerArray.length))
       ret.put(currentPartitionId, replicaBuffer)
@@ -399,8 +415,11 @@ object AdminUtils extends Logging {
                   replicationFactor: Int,
                   topicConfig: Properties = new Properties,
                   rackAwareMode: RackAwareMode = RackAwareMode.Enforced) {
+    // 从zk中获取所有broker节点
     val brokerMetadatas = getBrokerMetadatas(zkUtils, rackAwareMode)
+    // 根据获取的broker的原信息，以及指定的partition数、副本数创建topic
     val replicaAssignment = AdminUtils.assignReplicasToBrokers(brokerMetadatas, partitions, replicationFactor)
+    // 将topic的分配分配方案写进zk
     AdminUtils.createOrUpdateTopicPartitionAssignmentPathInZK(zkUtils, topic, replicaAssignment, topicConfig)
   }
 
@@ -436,6 +455,7 @@ object AdminUtils extends Logging {
       writeEntityConfig(zkUtils, ConfigType.Topic, topic, config)
     }
 
+    // 写入分区分配方案
     // create the partition assignment
     writeTopicPartitionAssignment(zkUtils, topic, partitionReplicaAssignment, update)
   }
@@ -446,6 +466,7 @@ object AdminUtils extends Logging {
       val jsonPartitionData = zkUtils.replicaAssignmentZkData(replicaAssignment.map(e => (e._1.toString -> e._2)))
 
       if (!update) {
+        // 创建持久化节点
         info("Topic creation " + jsonPartitionData.toString)
         zkUtils.createPersistentPath(zkPath, jsonPartitionData)
       } else {

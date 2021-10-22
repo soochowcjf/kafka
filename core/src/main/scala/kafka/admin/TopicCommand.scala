@@ -57,6 +57,7 @@ object TopicCommand extends Logging {
                           JaasUtils.isZkSecurityEnabled())
     var exitCode = 0
     try {
+      // 创建topic
       if(opts.options.has(opts.createOpt))
         createTopic(zkUtils, opts)
       else if(opts.options.has(opts.alterOpt))

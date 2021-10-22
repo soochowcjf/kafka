@@ -371,7 +371,9 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
               val liveBrokerIdsSorted = curBrokerIds.toSeq.sorted
               info("Newly added brokers: %s, deleted brokers: %s, all live brokers: %s"
                 .format(newBrokerIdsSorted.mkString(","), deadBrokerIdsSorted.mkString(","), liveBrokerIdsSorted.mkString(",")))
+              // 和所有新增加的broker节点建立tcp连接，这里呢，他是每个连接建立一个线程，这个设计其实是不好的，没有做到像客户端那样多路复用
               newBrokers.foreach(controllerContext.controllerChannelManager.addBroker)
+              // 断开与该客户端的连接，同时停止那个线程
               deadBrokerIds.foreach(controllerContext.controllerChannelManager.removeBroker)
               if(newBrokerIds.size > 0)
                 controller.onBrokerStartup(newBrokerIdsSorted)

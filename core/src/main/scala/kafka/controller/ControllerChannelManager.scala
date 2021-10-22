@@ -72,7 +72,9 @@ class ControllerChannelManager(controllerContext: ControllerContext, config: Kaf
     // be careful here. Maybe the startup() API has already started the request send thread
     brokerLock synchronized {
       if(!brokerStateInfo.contains(broker.id)) {
+        // 封装连接组件，连接线程
         addNewBroker(broker)
+        // 启动线程
         startRequestSendThread(broker.id)
       }
     }
@@ -169,6 +171,7 @@ class RequestSendThread(val controllerId: Int,
 
     def backoff(): Unit = CoreUtils.swallowTrace(Thread.sleep(300))
 
+    // 从queue里去任务
     val QueueItem(apiKey, apiVersion, request, callback) = queue.take()
     import NetworkClientBlockingOps._
     var clientResponse: ClientResponse = null
@@ -187,6 +190,7 @@ class RequestSendThread(val controllerId: Int,
               val requestHeader = apiVersion.fold(networkClient.nextRequestHeader(apiKey))(networkClient.nextRequestHeader(apiKey, _))
               val send = new RequestSend(brokerNode.idString, requestHeader, request.toStruct)
               val clientRequest = new ClientRequest(time.milliseconds(), true, send, null)
+              // 发送请求，阻塞等待响应
               clientResponse = networkClient.blockingSendAndReceive(clientRequest)(time)
               isSendSuccessful = true
             }
@@ -201,6 +205,7 @@ class RequestSendThread(val controllerId: Int,
           }
         }
         if (clientResponse != null) {
+          // 根据请求头的标识，对响应再封装
           val response = ApiKeys.forId(clientResponse.request.request.header.apiKey) match {
             case ApiKeys.LEADER_AND_ISR => new LeaderAndIsrResponse(clientResponse.responseBody)
             case ApiKeys.STOP_REPLICA => new StopReplicaResponse(clientResponse.responseBody)
@@ -211,6 +216,7 @@ class RequestSendThread(val controllerId: Int,
             .format(controllerId, controllerContext.epoch, response.toString, brokerNode.toString))
 
           if (callback != null) {
+            // 回调
             callback(response)
           }
         }
@@ -280,6 +286,17 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
                                        replicas: Seq[Int], callback: AbstractRequestResponse => Unit = null) {
     val topicPartition = new TopicPartition(topic, partition)
 
+    // <0,<order-topic-0,PartitionStateInfo>>
+    // <1,<order-topic-0,PartitionStateInfo>>
+    // <2,<order-topic-0,PartitionStateInfo>>
+
+    // <0,<order-topic-1,PartitionStateInfo>>
+    // <1,<order-topic-1,PartitionStateInfo>>
+    // <2,<order-topic-1,PartitionStateInfo>>
+
+    // <0,<order-topic-2,PartitionStateInfo>>
+    // <1,<order-topic-2,PartitionStateInfo>>
+    // <2,<order-topic-2,PartitionStateInfo>>
     brokerIds.filter(_ >= 0).foreach { brokerId =>
       val result = leaderAndIsrRequestMap.getOrElseUpdate(brokerId, mutable.Map.empty)
       result.put(topicPartition, PartitionStateInfo(leaderIsrAndControllerEpoch, replicas.toSet))
@@ -318,6 +335,8 @@ class ControllerBrokerRequestBatch(controller: KafkaController) extends  Logging
           } else {
             PartitionStateInfo(leaderIsrAndControllerEpoch, replicas)
           }
+
+          // 遍历集群中所有的broker
           brokerIds.filter(b => b >= 0).foreach { brokerId =>
             updateMetadataRequestMap.getOrElseUpdate(brokerId, mutable.Map.empty[TopicPartition, PartitionStateInfo])
             updateMetadataRequestMap(brokerId).put(new TopicPartition(partition.topic, partition.partition), partitionStateInfo)

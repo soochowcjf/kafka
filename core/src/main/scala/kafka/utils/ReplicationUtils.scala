@@ -75,6 +75,7 @@ object ReplicationUtils extends Logging {
     leaderAndIsrOpt.flatMap(leaderAndIsrStr => parseLeaderAndIsr(leaderAndIsrStr, leaderAndIsrPath, stat))
   }
 
+  // {"controller_epoch":6,"leader":1,"version":1,"leader_epoch":0,"isr":[1,2]}
   private def parseLeaderAndIsr(leaderAndIsrStr: String, path: String, stat: Stat)
       : Option[LeaderIsrAndControllerEpoch] = {
     Json.parseFull(leaderAndIsrStr).flatMap {m =>
