@@ -423,10 +423,14 @@ class PartitionStateMachine(controller: KafkaController) extends Logging {
               debug("Topic change listener fired for path %s with children %s".format(parentPath, children.mkString(",")))
               (children: Buffer[String]).toSet
             }
+            // 新增加的topic
             val newTopics = currentChildren -- controllerContext.allTopics
+            // 新删除的topic
             val deletedTopics = controllerContext.allTopics -- currentChildren
             controllerContext.allTopics = currentChildren
 
+            // 从zk中获取所有新增加的topic的元数据信息，每个topic的所有partition以及每个partition的所有副本节点
+            // {"version":1,"partitions":{"2":[0,1],"1":[2,0],"0":[1,2]}}
             val addedPartitionReplicaAssignment = zkUtils.getReplicaAssignmentForTopics(newTopics.toSeq)
             controllerContext.partitionReplicaAssignment = controllerContext.partitionReplicaAssignment.filter(p =>
               !deletedTopics.contains(p._1.topic))

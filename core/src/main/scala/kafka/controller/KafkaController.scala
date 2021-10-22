@@ -160,9 +160,12 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
   this.logIdent = "[Controller " + config.brokerId + "]: "
   private var isRunning = true
   private val stateChangeLogger = KafkaController.stateChangeLogger
+  // 默认zkSessionTimeoutMs 6s
   val controllerContext = new ControllerContext(zkUtils, config.zkSessionTimeoutMs)
+  // partition状态机
   val partitionStateMachine = new PartitionStateMachine(this)
   val replicaStateMachine = new ReplicaStateMachine(this)
+  // controller选举器
   private val controllerElector = new ZookeeperLeaderElector(controllerContext, ZkUtils.ControllerPath, onControllerFailover,
     onControllerResignation, config.brokerId)
   // have a separate scheduler for the controller to be able to start and stop independently of the
@@ -620,9 +623,13 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
 
   def initiateReassignReplicasForTopicPartition(topicAndPartition: TopicAndPartition,
                                         reassignedPartitionContext: ReassignedPartitionsContext) {
+    // 新副本们
     val newReplicas = reassignedPartitionContext.newReplicas
+    // topic
     val topic = topicAndPartition.topic
+    // partition
     val partition = topicAndPartition.partition
+    // 存活的新副本
     val aliveNewReplicas = newReplicas.filter(r => controllerContext.liveBrokerIds.contains(r))
     try {
       val assignedReplicasOpt = controllerContext.partitionReplicaAssignment.get(topicAndPartition)
@@ -634,6 +641,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
           } else {
             if(aliveNewReplicas == newReplicas) {
               info("Handling reassignment of partition %s to new replicas %s".format(topicAndPartition, newReplicas.mkString(",")))
+              // 为每个topicPartition在zk上注册ISR列表变更监听器
               // first register ISR change listener
               watchIsrChangesForReassignedPartition(topic, partition, reassignedPartitionContext)
               controllerContext.partitionsBeingReassigned.put(topicAndPartition, reassignedPartitionContext)
@@ -1241,6 +1249,8 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
 }
 
 /**
+ * partition的重新分配
+ *
  * Starts the partition reassignment process unless -
  * 1. Partition previously existed
  * 2. New replicas are the same as existing replicas
@@ -1273,6 +1283,7 @@ class PartitionsReassignedListener(controller: KafkaController) extends IZkDataL
           controller.removePartitionFromReassignedPartitions(partitionToBeReassigned._1)
         } else {
           val context = new ReassignedPartitionsContext(partitionToBeReassigned._2)
+          // 为某个topicPartition分配副本
           controller.initiateReassignReplicasForTopicPartition(partitionToBeReassigned._1, context)
         }
       }
@@ -1289,6 +1300,14 @@ class PartitionsReassignedListener(controller: KafkaController) extends IZkDataL
   }
 }
 
+/**
+ * 某个topicPartition的ISR列表变更监听器
+ *
+ * @param controller
+ * @param topic
+ * @param partition
+ * @param reassignedReplicas
+ */
 class ReassignedPartitionsIsrChangeListener(controller: KafkaController, topic: String, partition: Int,
                                             reassignedReplicas: Set[Int])
   extends IZkDataListener with Logging {
@@ -1309,10 +1328,12 @@ class ReassignedPartitionsIsrChangeListener(controller: KafkaController, topic: 
         // check if this partition is still being reassigned or not
         controllerContext.partitionsBeingReassigned.get(topicAndPartition) match {
           case Some(reassignedPartitionContext) =>
+            // 重新读取呢，是为了读取zk节点的一些信息 Stat
             // need to re-read leader and isr from zookeeper since the zkclient callback doesn't return the Stat object
             val newLeaderAndIsrOpt = zkUtils.getLeaderAndIsrForPartition(topic, partition)
             newLeaderAndIsrOpt match {
               case Some(leaderAndIsr) => // check if new replicas have joined ISR
+                // 交集
                 val caughtUpReplicas = reassignedReplicas & leaderAndIsr.isr.toSet
                 if(caughtUpReplicas == reassignedReplicas) {
                   // resume the partition reassignment process
@@ -1362,6 +1383,7 @@ class IsrChangeNotificationListener(controller: KafkaController) extends IZkChil
         val topicAndPartitions: immutable.Set[TopicAndPartition] = childrenAsScala.map(x => getTopicAndPartition(x)).flatten.toSet
         if (topicAndPartitions.nonEmpty) {
           controller.updateLeaderAndIsrCache(topicAndPartitions)
+          // 下发元数据到其他节点
           processUpdateNotifications(topicAndPartitions)
         }
       } finally {

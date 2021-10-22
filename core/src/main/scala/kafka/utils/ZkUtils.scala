@@ -603,7 +603,10 @@ class ZkUtils(val zkClient: ZkClient,
 
   def getReplicaAssignmentForTopics(topics: Seq[String]): mutable.Map[TopicAndPartition, Seq[Int]] = {
     val ret = new mutable.HashMap[TopicAndPartition, Seq[Int]]
+    // 遍历所有topic
     topics.foreach { topic =>
+      // 从zk的 "/brokers/topics/{topic}"下读取元数据
+      // {"version":1,"partitions":{"2":[0,1],"1":[2,0],"0":[1,2]}}
       val jsonPartitionMapOpt = readDataMaybeNull(getTopicPath(topic))._1
       jsonPartitionMapOpt match {
         case Some(jsonPartitionMap) =>
@@ -611,6 +614,7 @@ class ZkUtils(val zkClient: ZkClient,
             case Some(m) => m.asInstanceOf[Map[String, Any]].get("partitions") match {
               case Some(repl)  =>
                 val replicaMap = repl.asInstanceOf[Map[String, Seq[Int]]]
+                // 每个partition对应的所有副本
                 for((partition, replicas) <- replicaMap){
                   ret.put(TopicAndPartition(topic, partition.toInt), replicas)
                   debug("Replicas assigned to topic [%s], partition [%s] are [%s]".format(topic, partition, replicas))

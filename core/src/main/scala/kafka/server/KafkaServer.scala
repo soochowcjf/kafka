@@ -199,6 +199,7 @@ class KafkaServer(val config: KafkaConfig, time: Time = SystemTime, threadNamePr
           isShuttingDown)
         replicaManager.startup()
 
+        // kafka controller控制器
         /* start kafka controller */
         kafkaController = new KafkaController(config, zkUtils, brokerState, kafkaMetricsTime, metrics, threadNamePrefix)
         kafkaController.startup()

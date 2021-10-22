@@ -360,7 +360,9 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
               val curBrokers = currentBrokerList.map(_.toInt).toSet.flatMap(zkUtils.getBrokerInfo)
               val curBrokerIds = curBrokers.map(_.id)
               val liveOrShuttingDownBrokerIds = controllerContext.liveOrShuttingDownBrokerIds
+              // 新增加的broker节点
               val newBrokerIds = curBrokerIds -- liveOrShuttingDownBrokerIds
+              // 宕机的broker节点
               val deadBrokerIds = liveOrShuttingDownBrokerIds -- curBrokerIds
               val newBrokers = curBrokers.filter(broker => newBrokerIds(broker.id))
               controllerContext.liveBrokers = curBrokers

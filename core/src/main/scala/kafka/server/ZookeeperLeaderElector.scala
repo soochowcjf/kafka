@@ -46,6 +46,7 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
 
   def startup {
     inLock(controllerContext.controllerLock) {
+      // 在"/controller"下注册leader变化监听器，也就是说，该path下的数据变更了的话，就会回调该listener
       controllerContext.zkUtils.zkClient.subscribeDataChanges(electionPath, leaderChangeListener)
       // 进行选举
       elect
@@ -77,7 +78,7 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
     }
 
     try {
-      // 在zk的"/controller"下创建临时节点，数据就是 electString
+      // 在zk的"/controller"下创建临时节点，数据就是 electString，临时节点呢，只要连接断开，临时节点就会自动删除
       val zkCheckedEphemeral = new ZKCheckedEphemeral(electionPath,
                                                       electString,
                                                       controllerContext.zkUtils.zkConnection.getZookeeper,
@@ -142,6 +143,8 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
     }
 
     /**
+     * 如果leader节点是其他节点，且他宕机了，那么他与zk的连接就会断开，"/controller"临时节点就会删除，那么也就会回调到这里
+     *
      * Called when the leader information stored in zookeeper has been delete. Try to elect as the leader
      * @throws Exception
      *             On any error.
@@ -152,10 +155,10 @@ class ZookeeperLeaderElector(controllerContext: ControllerContext,
         debug("%s leader change listener fired for path %s to handle data deleted: trying to elect as a leader"
           .format(brokerId, dataPath))
         if(amILeader) {
-          // 解绑一些listener,清除一些数据结构
+          // 如果本来就是leader节点的话，就解绑一些listener,清除一些数据结构
           onResigningAsLeader()
         }
-        // 重新选举
+        // 竞选成为leader，也就是向zk写"/controller"临时节点
         elect
       }
     }
