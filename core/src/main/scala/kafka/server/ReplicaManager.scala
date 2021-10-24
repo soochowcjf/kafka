@@ -683,6 +683,7 @@ class ReplicaManager(val config: KafkaConfig,
           }
         }
 
+        // 如果leader的brokerId==当前的brokerId，那么当前broker就是该partition的leader
         val partitionsTobeLeader = partitionState.filter { case (partition, stateInfo) =>
           stateInfo.leader == config.brokerId
         }

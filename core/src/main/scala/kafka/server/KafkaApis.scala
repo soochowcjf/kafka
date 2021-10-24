@@ -78,9 +78,13 @@ class KafkaApis(val requestChannel: RequestChannel,
         // 处理副本同步fetch请求
         case ApiKeys.FETCH => handleFetchRequest(request)
         case ApiKeys.LIST_OFFSETS => handleOffsetRequest(request)
+        // 获取元数据
         case ApiKeys.METADATA => handleTopicMetadataRequest(request)
+        // 更新leader和ISR信息
         case ApiKeys.LEADER_AND_ISR => handleLeaderAndIsrRequest(request)
+        // 删除副本
         case ApiKeys.STOP_REPLICA => handleStopReplicaRequest(request)
+        // 更新元数据
         case ApiKeys.UPDATE_METADATA_KEY => handleUpdateMetadataRequest(request)
         case ApiKeys.CONTROLLED_SHUTDOWN_KEY => handleControlledShutdownRequest(request)
         case ApiKeys.OFFSET_COMMIT => handleOffsetCommitRequest(request)

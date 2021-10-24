@@ -365,6 +365,7 @@ class ReplicaStateMachine(controller: KafkaController) extends Logging {
               // 宕机的broker节点
               val deadBrokerIds = liveOrShuttingDownBrokerIds -- curBrokerIds
               val newBrokers = curBrokers.filter(broker => newBrokerIds(broker.id))
+              // 更新controller内存中存活的broker节点信息
               controllerContext.liveBrokers = curBrokers
               val newBrokerIdsSorted = newBrokerIds.toSeq.sorted
               val deadBrokerIdsSorted = deadBrokerIds.toSeq.sorted

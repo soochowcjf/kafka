@@ -46,10 +46,13 @@ object ReassignPartitionsCommand extends Logging {
     try {
       if(opts.options.has(opts.verifyOpt))
         verifyAssignment(zkUtils, opts)
-      else if(opts.options.has(opts.generateOpt))
+      else if(opts.options.has(opts.generateOpt)) {
+        // 生成分配方案
         generateAssignment(zkUtils, opts)
-      else if (opts.options.has(opts.executeOpt))
+      } else if (opts.options.has(opts.executeOpt)) {
+        // 执行分配方案
         executeAssignment(zkUtils, opts)
+      }
     } catch {
       case e: Throwable =>
         println("Partitions reassignment failed due to " + e.getMessage)
@@ -102,15 +105,19 @@ object ReassignPartitionsCommand extends Logging {
     val duplicateTopicsToReassign = CoreUtils.duplicates(topicsToReassign)
     if (duplicateTopicsToReassign.nonEmpty)
       throw new AdminCommandFailedException("List of topics to reassign contains duplicate entries: %s".format(duplicateTopicsToReassign.mkString(",")))
+    // 当前的这些topic的分配方案
     val currentAssignment = zkUtils.getReplicaAssignmentForTopics(topicsToReassign)
 
+    // 按照topic进行分组
     val groupedByTopic = currentAssignment.groupBy { case (tp, _) => tp.topic }
     val rackAwareMode = if (disableRackAware) RackAwareMode.Disabled else RackAwareMode.Enforced
+    // 获取这些broker的元数据
     val brokerMetadatas = AdminUtils.getBrokerMetadatas(zkUtils, rackAwareMode, Some(brokerListToReassign))
 
     val partitionsToBeReassigned = mutable.Map[TopicAndPartition, Seq[Int]]()
     groupedByTopic.foreach { case (topic, assignment) =>
       val (_, replicas) = assignment.head
+      // 将按照原来的partition数、replica数，重新生成分配方案到给的broker节点上
       val assignedReplicas = AdminUtils.assignReplicasToBrokers(brokerMetadatas, assignment.size, replicas.size)
       partitionsToBeReassigned ++= assignedReplicas.map { case (partition, replicas) =>
         (TopicAndPartition(topic, partition) -> replicas)
@@ -150,6 +157,7 @@ object ReassignPartitionsCommand extends Logging {
     val currentPartitionReplicaAssignment = zkUtils.getReplicaAssignmentForTopics(partitionsToBeReassigned.map(_._1.topic))
     println("Current partition replica assignment\n\n%s\n\nSave this to use as the --reassignment-json-file option during rollback"
       .format(zkUtils.formatAsReassignmentJson(currentPartitionReplicaAssignment)))
+    // 执行重新分配
     // start the reassignment
     if(reassignPartitionsCommand.reassignPartitions())
       println("Successfully started reassignment of partitions %s".format(zkUtils.formatAsReassignmentJson(partitionsToBeReassigned.toMap)))
@@ -234,6 +242,7 @@ class ReassignPartitionsCommand(zkUtils: ZkUtils, partitions: collection.Map[Top
       }
       else {
         val jsonReassignmentData = zkUtils.formatAsReassignmentJson(validPartitions)
+        // 在"/admin/reassign_partitions"创建持久节点
         zkUtils.createPersistentPath(ZkUtils.ReassignPartitionsPath, jsonReassignmentData)
         true
       }
