@@ -131,6 +131,11 @@ public class JoinGroupResponse extends AbstractRequestResponse {
         return memberId.equals(leaderId);
     }
 
+    /**
+     * 每个memberId，对应的订阅的topics
+     *
+     * @return
+     */
     public Map<String, ByteBuffer> members() {
         return members;
     }

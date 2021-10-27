@@ -341,6 +341,7 @@ public class NetworkClient implements KafkaClient {
      */
     @Override
     public void wakeup() {
+        // 内部的nioSelector在执行select方法时，是有可能被阻塞住的
         this.selector.wakeup();
     }
 

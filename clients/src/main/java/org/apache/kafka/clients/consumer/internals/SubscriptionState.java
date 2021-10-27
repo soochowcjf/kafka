@@ -60,6 +60,7 @@ public class SubscriptionState {
     /* the list of topics the user has requested */
     private final Set<String> subscription;
 
+    // 该group 需要订阅的topic
     /* the list of topics the group has subscribed to (set only for the leader on join group completion) */
     private final Set<String> groupSubscription;
 
@@ -184,6 +185,7 @@ public class SubscriptionState {
         this.assignment.clear();
         for (TopicPartition tp: assignments)
             addAssignedPartition(tp);
+        // 不需要副本分配方案了
         this.needsPartitionAssignment = false;
     }
 
@@ -338,6 +340,10 @@ public class SubscriptionState {
         return true;
     }
 
+    /**
+     * 获取缺乏fetch 位置的topicPartition们
+     * @return
+     */
     public Set<TopicPartition> missingFetchPositions() {
         Set<TopicPartition> missing = new HashSet<>();
         for (Map.Entry<TopicPartition, TopicPartitionState> entry : assignment.entrySet())

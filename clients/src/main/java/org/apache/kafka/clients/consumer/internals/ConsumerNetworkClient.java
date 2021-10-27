@@ -48,6 +48,7 @@ public class ConsumerNetworkClient implements Closeable {
     private final KafkaClient client;
     private final AtomicBoolean wakeup = new AtomicBoolean(false);
     private final DelayedTaskQueue delayedTasks = new DelayedTaskQueue();
+    // 针对每个node的请求队列
     private final Map<Node, List<ClientRequest>> unsent = new HashMap<>();
     private final Metadata metadata;
     private final Time time;
@@ -215,6 +216,7 @@ public class ConsumerNetworkClient implements Closeable {
     }
 
     private void poll(long timeout, long now, boolean executeDelayedTasks) {
+        // 将每个node的对应的unsent队列中的请求，设置到kafkaChannel中，供后面发送
         // send all the requests we can send now
         trySend(now);
 

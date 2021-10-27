@@ -129,6 +129,8 @@ public class Fetcher<K, V> {
             final FetchRequest request = fetchEntry.getValue();
             client.send(fetchEntry.getKey(), ApiKeys.FETCH, request)
                     .addListener(new RequestFutureListener<ClientResponse>() {
+
+                        //fetch成功返回的响应数据
                         @Override
                         public void onSuccess(ClientResponse resp) {
                             FetchResponse response = new FetchResponse(resp.responseBody());
@@ -137,8 +139,11 @@ public class Fetcher<K, V> {
 
                             for (Map.Entry<TopicPartition, FetchResponse.PartitionData> entry : response.responseData().entrySet()) {
                                 TopicPartition partition = entry.getKey();
+                                // 拉取的起始位置
                                 long fetchOffset = request.fetchData().get(partition).offset;
+                                // 拉取回来的数据
                                 FetchResponse.PartitionData fetchData = entry.getValue();
+                                // 将响应结果加入到completedFetches中去
                                 completedFetches.add(new CompletedFetch(partition, fetchOffset, fetchData, metricAggregator));
                             }
 
@@ -311,6 +316,7 @@ public class Fetcher<K, V> {
      */
     private long listOffset(TopicPartition partition, long timestamp) {
         while (true) {
+            // 发送LIST_OFFSETS请求
             RequestFuture<Long> future = sendListOffsetRequest(partition, timestamp);
             client.poll(future);
 
@@ -392,6 +398,7 @@ public class Fetcher<K, V> {
                     records.addAll(partRecords);
                 }
 
+                // 更新下次需要拉取的起始offset，autoCommitTask也是提交的这个offset
                 subscriptions.position(partitionRecords.partition, nextOffset);
                 return partRecords.size();
             } else {
@@ -483,12 +490,16 @@ public class Fetcher<K, V> {
     private Map<Node, FetchRequest> createFetchRequests() {
         // create the fetch info
         Cluster cluster = metadata.fetch();
+        //
         Map<Node, Map<TopicPartition, FetchRequest.PartitionData>> fetchable = new HashMap<>();
+
         for (TopicPartition partition : fetchablePartitions()) {
+            // 获取该partition的leader节点
             Node node = cluster.leaderFor(partition);
             if (node == null) {
                 metadata.requestUpdate();
             } else if (this.client.pendingRequestCount(node) == 0) {
+                // 如果存在leader节点，并且与该node没有飞行中的请求，那么就需要构造一个fetch请求
                 // if there is a leader and no in-flight requests, issue a new fetch
                 Map<TopicPartition, FetchRequest.PartitionData> fetch = fetchable.get(node);
                 if (fetch == null) {
@@ -496,12 +507,14 @@ public class Fetcher<K, V> {
                     fetchable.put(node, fetch);
                 }
 
+                // 从上次消费的位置开始拉
                 long position = this.subscriptions.position(partition);
                 fetch.put(partition, new FetchRequest.PartitionData(position, this.fetchSize));
                 log.trace("Added fetch request for partition {} at offset {}", partition, position);
             }
         }
 
+        // 每个node构造一个fetchRequest
         // create the fetches
         Map<Node, FetchRequest> requests = new HashMap<>();
         for (Map.Entry<Node, Map<TopicPartition, FetchRequest.PartitionData>> entry : fetchable.entrySet()) {
@@ -516,8 +529,11 @@ public class Fetcher<K, V> {
      * The callback for fetch completion
      */
     private PartitionRecords<K, V> parseFetchedData(CompletedFetch completedFetch) {
+        // 从哪个topic的partition消费的数据
         TopicPartition tp = completedFetch.partition;
+        // 拉取回来的数据
         FetchResponse.PartitionData partition = completedFetch.partitionData;
+        // 从哪个offset开始拉的
         long fetchOffset = completedFetch.fetchedOffset;
         int bytes = 0;
         int recordsCount = 0;
@@ -532,6 +548,7 @@ public class Fetcher<K, V> {
                 // we are interested in this fetch only if the beginning offset matches the
                 // current consumed position
                 Long position = subscriptions.position(tp);
+                // 校验offset
                 if (position == null || position != fetchOffset) {
                     log.debug("Discarding stale fetch response for partition {} since its offset {} does not match " +
                             "the expected offset {}", tp, fetchOffset, position);
@@ -545,6 +562,7 @@ public class Fetcher<K, V> {
                 for (LogEntry logEntry : records) {
                     // Skip the messages earlier than current position.
                     if (logEntry.offset() >= position) {
+                        // 解析每条数据
                         parsed.add(parseRecord(tp, logEntry));
                         bytes += logEntry.size();
                     } else {

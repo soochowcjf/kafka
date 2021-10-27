@@ -137,6 +137,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         for (PartitionAssignor assignor : assignors) {
             Subscription subscription = assignor.subscription(subscriptions.subscription());
             ByteBuffer metadata = ConsumerProtocol.serializeSubscription(subscription);
+            // range
             metadataList.add(new ProtocolMetadata(assignor.name(), metadata));
         }
         return metadataList;
@@ -211,17 +212,21 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         if (assignor == null)
             throw new IllegalStateException("Coordinator selected invalid assignment protocol: " + assignmentStrategy);
 
+        // 反序列化分配方案
         Assignment assignment = ConsumerProtocol.deserializeAssignment(assignmentBuffer);
 
+        // 设置需要去协调节点拉取最后提交的offset
         // set the flag to refresh last committed offsets
         subscriptions.needRefreshCommits();
 
+        // 更新分配方案
         // update partition assignment
         subscriptions.assignFromSubscribed(assignment.partitions());
 
         // give the assignor a chance to update internal state based on the received assignment
         assignor.onAssignment(assignment);
 
+        // 自动提交offset的任务
         // reschedule the auto commit starting from now
         if (autoCommitEnabled)
             autoCommitTask.reschedule();
@@ -244,13 +249,16 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
     protected Map<String, ByteBuffer> performAssignment(String leaderId,
                                                         String assignmentStrategy,
                                                         Map<String, ByteBuffer> allSubscriptions) {
+        // 默认是range
         PartitionAssignor assignor = lookupAssignor(assignmentStrategy);
         if (assignor == null)
             throw new IllegalStateException("Coordinator selected invalid assignment protocol: " + assignmentStrategy);
 
         Set<String> allSubscribedTopics = new HashSet<>();
+        // memberId => topic集合
         Map<String, Subscription> subscriptions = new HashMap<>();
         for (Map.Entry<String, ByteBuffer> subscriptionEntry : allSubscriptions.entrySet()) {
+            // 获取所有的topic
             Subscription subscription = ConsumerProtocol.deserializeSubscription(subscriptionEntry.getValue());
             subscriptions.put(subscriptionEntry.getKey(), subscription);
             allSubscribedTopics.addAll(subscription.topics());
@@ -275,7 +283,9 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
         Map<String, ByteBuffer> groupAssignment = new HashMap<>();
         for (Map.Entry<String, Assignment> assignmentEntry : assignment.entrySet()) {
+            // 将topicPartition序列化为 topic [partition0,partition1,...] 字节数组
             ByteBuffer buffer = ConsumerProtocol.serializeAssignment(assignmentEntry.getValue());
+            // 每个memberId对应的需要消费的topicPartition
             groupAssignment.put(assignmentEntry.getKey(), buffer);
         }
 
@@ -335,6 +345,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
         while (true) {
             ensureCoordinatorReady();
 
+            // 发送OFFSET_FETCH请求给协调节点，获取每个分区拉取到的offset
             // contact coordinator to fetch committed offsets
             RequestFuture<Map<TopicPartition, OffsetAndMetadata>> future = sendOffsetFetchRequest(partitions);
             client.poll(future);
@@ -381,6 +392,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
     public void commitOffsetsAsync(final Map<TopicPartition, OffsetAndMetadata> offsets, OffsetCommitCallback callback) {
         this.subscriptions.needRefreshCommits();
+        // 发送commit
         RequestFuture<Void> future = sendOffsetCommitRequest(offsets);
         final OffsetCommitCallback cb = callback == null ? defaultOffsetCommitCallback : callback;
         future.addListener(new RequestFutureListener<Void>() {
@@ -526,6 +538,7 @@ public final class ConsumerCoordinator extends AbstractCoordinator {
 
         log.trace("Sending offset-commit request with {} to coordinator {} for group {}", offsets, coordinator, groupId);
 
+        // 发送给你协调节点
         return client.send(coordinator, ApiKeys.OFFSET_COMMIT, req)
                 .compose(new OffsetCommitResponseHandler(offsets));
     }

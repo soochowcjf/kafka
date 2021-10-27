@@ -84,7 +84,9 @@ public class ConsumerProtocol {
         struct.set(USER_DATA_KEY_NAME, subscription.userData());
         struct.set(TOPICS_KEY_NAME, subscription.topics().toArray());
         ByteBuffer buffer = ByteBuffer.allocate(CONSUMER_PROTOCOL_HEADER_V0.sizeOf() + SUBSCRIPTION_V0.sizeOf(struct));
+        // version 0
         CONSUMER_PROTOCOL_HEADER_V0.writeTo(buffer);
+        // topic
         SUBSCRIPTION_V0.write(buffer, struct);
         buffer.flip();
         return buffer;
@@ -147,6 +149,12 @@ public class ConsumerProtocol {
     }
 
 
+    /**
+     * 返回结果为：topic => partitionId集合
+     *
+     * @param partitions
+     * @return
+     */
     private static Map<String, List<Integer>> asMap(Collection<TopicPartition> partitions) {
         Map<String, List<Integer>> partitionMap = new HashMap<>();
         for (TopicPartition partition : partitions) {

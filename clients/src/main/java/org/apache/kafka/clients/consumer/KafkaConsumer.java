@@ -595,8 +595,11 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                           Deserializer<V> valueDeserializer) {
         try {
             log.debug("Starting the Kafka consumer");
+            // 请求超时时间，默认40s
             this.requestTimeoutMs = config.getInt(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG);
+            // 会话过期时间，如果consumer没有发送心跳，coordinator就会进行rebalance，默认30s
             int sessionTimeOutMs = config.getInt(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG);
+            // fetch的等待时间，如果没有超过fetch.max.bytes，默认500ms
             int fetchMaxWaitMs = config.getInt(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG);
             if (this.requestTimeoutMs <= sessionTimeOutMs || this.requestTimeoutMs <= fetchMaxWaitMs)
                 throw new ConfigException(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG + " should be greater than " + ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG + " and " + ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG);
@@ -615,8 +618,11 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     MetricsReporter.class);
             reporters.add(new JmxReporter(JMX_PREFIX));
             this.metrics = new Metrics(metricConfig, reporters, time);
+            // 重试间隔，默认100ms
             this.retryBackoffMs = config.getLong(ConsumerConfig.RETRY_BACKOFF_MS_CONFIG);
+            // METADATA_MAX_AGE_CONFIG 默认5min
             this.metadata = new Metadata(retryBackoffMs, config.getLong(ConsumerConfig.METADATA_MAX_AGE_CONFIG));
+            // 配置的kafka的broker地址
             List<InetSocketAddress> addresses = ClientUtils.parseAndValidateAddresses(config.getList(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG));
             this.metadata.update(Cluster.bootstrap(addresses), 0);
             String metricGrpPrefix = "consumer";
@@ -626,6 +632,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     this.metadata,
                     clientId,
                     100, // a fixed large enough value will suffice
+                    // 默认50ms
                     config.getLong(ConsumerConfig.RECONNECT_BACKOFF_MS_CONFIG),
                     config.getInt(ConsumerConfig.SEND_BUFFER_CONFIG),
                     config.getInt(ConsumerConfig.RECEIVE_BUFFER_CONFIG),
@@ -634,6 +641,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     config.getInt(ConsumerConfig.REQUEST_TIMEOUT_MS_CONFIG));
             OffsetResetStrategy offsetResetStrategy = OffsetResetStrategy.valueOf(config.getString(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG).toUpperCase(Locale.ROOT));
             this.subscriptions = new SubscriptionState(offsetResetStrategy);
+            // coordinator进行rebalance时的分区器，默认是RangeAssignor
             List<PartitionAssignor> assignors = config.getConfiguredInstances(
                     ConsumerConfig.PARTITION_ASSIGNMENT_STRATEGY_CONFIG,
                     PartitionAssignor.class);
@@ -644,8 +652,11 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     ConsumerInterceptor.class);
             this.interceptors = interceptorList.isEmpty() ? null : new ConsumerInterceptors<>(interceptorList);
             this.coordinator = new ConsumerCoordinator(this.client,
+                    // group.id
                     config.getString(ConsumerConfig.GROUP_ID_CONFIG),
+                    // session.timeout.ms 默认30s
                     config.getInt(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG),
+                    // 心跳间隔时间，默认3s
                     config.getInt(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG),
                     assignors,
                     this.metadata,
@@ -655,7 +666,9 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                     this.time,
                     retryBackoffMs,
                     new ConsumerCoordinator.DefaultOffsetCommitCallback(),
+                    // 是否自动提交offset
                     config.getBoolean(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG),
+                    // 自动提交offset的间隔，默认5s
                     config.getLong(ConsumerConfig.AUTO_COMMIT_INTERVAL_MS_CONFIG),
                     this.interceptors,
                     config.getBoolean(ConsumerConfig.EXCLUDE_INTERNAL_TOPICS_CONFIG));
@@ -676,10 +689,15 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
                 this.valueDeserializer = valueDeserializer;
             }
             this.fetcher = new Fetcher<>(this.client,
+                    // 最少拉取的字节数，默认1个字节
                     config.getInt(ConsumerConfig.FETCH_MIN_BYTES_CONFIG),
+                    // fetch数据时，最大等待时长，默认500ms
                     config.getInt(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG),
+                    // 每个partition最大拉取的字节数，默认1m
                     config.getInt(ConsumerConfig.MAX_PARTITION_FETCH_BYTES_CONFIG),
+                    // 一次poll最大拉取的消息数，默认Integer.MAX_VALUE,
                     config.getInt(ConsumerConfig.MAX_POLL_RECORDS_CONFIG),
+                    // 是否校验数据
                     config.getBoolean(ConsumerConfig.CHECK_CRCS_CONFIG),
                     this.keyDeserializer,
                     this.valueDeserializer,
@@ -970,13 +988,16 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
      * @return The fetched records (may be empty)
      */
     private Map<TopicPartition, List<ConsumerRecord<K, V>>> pollOnce(long timeout) {
+        // 去找一个负载低的broker，发送groupId，回去协调节点
         // TODO: Sub-requests should take into account the poll timeout (KAFKA-1894)
         coordinator.ensureCoordinatorReady();
 
+        // 跟协调节点通信，获取分配方案（这里有leader和follower的区别）
         // ensure we have partitions assigned if we expect to
         if (subscriptions.partitionsAutoAssigned())
             coordinator.ensurePartitionAssignment();
 
+        // 获取所有分区的拉取offset
         // fetch positions if we have partitions we're subscribed to that we
         // don't know the offset for
         if (!subscriptions.hasAllFetchPositions())
@@ -995,6 +1016,7 @@ public class KafkaConsumer<K, V> implements Consumer<K, V> {
         if (!records.isEmpty())
             return records;
 
+        // 构造fetch请求
         fetcher.sendFetches();
         client.poll(timeout, now);
         return fetcher.fetchedRecords();

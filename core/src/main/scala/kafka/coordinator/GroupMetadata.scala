@@ -136,6 +136,7 @@ private[coordinator] class GroupMetadata(val groupId: String, val protocolType: 
   def add(memberId: String, member: MemberMetadata) {
     assert(supportsProtocols(member.protocols))
 
+    // 第一个发JoinGroup请求的节点，就是这个消费组的leader
     if (leaderId == null)
       leaderId = memberId
     members.put(memberId, member)

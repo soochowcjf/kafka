@@ -21,6 +21,7 @@ import java.util.PriorityQueue;
  */
 public class DelayedTaskQueue {
 
+    // 优先级队列
     private PriorityQueue<Entry> tasks;
 
     public DelayedTaskQueue() {

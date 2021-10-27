@@ -102,6 +102,12 @@ class GroupMetadataManager(val brokerId: Int,
 
   def currentGroups(): Iterable[GroupMetadata] = groupsCache.values
 
+  /**
+   * 根据groupId进行hash，然后再对"__consumer_offsets"的分区数进行取模
+   *
+   * @param groupId
+   * @return
+   */
   def partitionFor(groupId: String): Int = Utils.abs(groupId.hashCode) % groupMetadataTopicPartitionCount
 
   def isGroupLocal(groupId: String): Boolean = loadingPartitions synchronized ownedPartitions.contains(partitionFor(groupId))
@@ -280,6 +286,7 @@ class GroupMetadataManager(val brokerId: Int,
       val responseCode =
         if (status.errorCode == Errors.NONE.code) {
           filteredOffsetMetadata.foreach { case (topicAndPartition, offsetAndMetadata) =>
+            // 写缓存
             putOffset(GroupTopicPartition(groupId, topicAndPartition), offsetAndMetadata)
           }
           Errors.NONE.code

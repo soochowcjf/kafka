@@ -265,6 +265,7 @@ class GroupCoordinator(val brokerId: Int,
             group.get(memberId).awaitingSyncCallback = responseCallback
             completeAndScheduleNextHeartbeatExpiration(group, group.get(memberId))
 
+            // 只有是leader才会进行分配方案的制定，并将分配方案发送过来
             // if this is the leader, then we can attempt to persist state and transition to stable
             if (memberId == group.leaderId) {
               info(s"Assignment received from leader for group ${group.groupId} for generation ${group.generationId}")
@@ -283,7 +284,9 @@ class GroupCoordinator(val brokerId: Int,
                       resetAndPropagateAssignmentError(group, errorCode)
                       maybePrepareRebalance(group)
                     } else {
+                      // 将分配方案写回所有的客户端
                       setAndPropagateAssignment(group, assignment)
+                      // group的状态转换为Stable
                       group.transitionTo(Stable)
                     }
                   }
@@ -585,6 +588,7 @@ class GroupCoordinator(val brokerId: Int,
                                     callback: JoinCallback) = {
     // use the client-id with a random id suffix as the member-id
     val memberId = clientId + "-" + group.generateMemberIdSuffix
+    // 这里的protocols，默认传过来的是range
     val member = new MemberMetadata(memberId, group.groupId, clientId, clientHost, sessionTimeoutMs, protocols)
     member.awaitingJoinCallback = callback
     group.add(member.memberId, member)
@@ -613,10 +617,12 @@ class GroupCoordinator(val brokerId: Int,
     if (group.is(AwaitingSync))
       resetAndPropagateAssignmentError(group, Errors.REBALANCE_IN_PROGRESS.code)
 
+    // 转移group的状态为PreparingRebalance
     group.transitionTo(PreparingRebalance)
     info("Preparing to restabilize group %s with old generation %s".format(group.groupId, group.generationId))
 
     val rebalanceTimeout = group.rebalanceTimeout
+    // 创建延时任务，加入时间轮
     val delayedRebalance = new DelayedJoin(this, group, rebalanceTimeout)
     val groupKey = GroupKey(group.groupId)
     joinPurgatory.tryCompleteElseWatch(delayedRebalance, Seq(groupKey))
@@ -661,12 +667,14 @@ class GroupCoordinator(val brokerId: Int,
         }
       }
       if (!group.is(Dead)) {
+        // group状态转换为AwaitingSync
         group.initNextGeneration()
         info("Stabilized group %s generation %s".format(group.groupId, group.generationId))
 
         // trigger the awaiting join group response callback for all the members after rebalancing
         for (member <- group.allMemberMetadata) {
           assert(member.awaitingJoinCallback != null)
+          // 返回结果
           val joinResult = JoinGroupResult(
             members=if (member.memberId == group.leaderId) { group.currentMemberMetadata } else { Map.empty },
             memberId=member.memberId,
@@ -677,6 +685,7 @@ class GroupCoordinator(val brokerId: Int,
 
           member.awaitingJoinCallback(joinResult)
           member.awaitingJoinCallback = null
+          // 心跳检测线程
           completeAndScheduleNextHeartbeatExpiration(group, member)
         }
       }
@@ -728,7 +737,9 @@ object GroupCoordinator {
             zkUtils: ZkUtils,
             replicaManager: ReplicaManager,
             time: Time): GroupCoordinator = {
+    // 心跳时间轮
     val heartbeatPurgatory = DelayedOperationPurgatory[DelayedHeartbeat]("Heartbeat", config.brokerId)
+    // 消费者join请求，时间轮
     val joinPurgatory = DelayedOperationPurgatory[DelayedJoin]("Rebalance", config.brokerId)
     apply(config, zkUtils, replicaManager, heartbeatPurgatory, joinPurgatory, time)
   }
@@ -740,14 +751,21 @@ object GroupCoordinator {
             joinPurgatory: DelayedOperationPurgatory[DelayedJoin],
             time: Time): GroupCoordinator = {
     val offsetConfig = OffsetConfig(maxMetadataSize = config.offsetMetadataMaxSize,
+      // 5m
       loadBufferSize = config.offsetsLoadBufferSize,
+      // 24h
       offsetsRetentionMs = config.offsetsRetentionMinutes * 60 * 1000L,
+      // 600000L=10min
       offsetsRetentionCheckIntervalMs = config.offsetsRetentionCheckIntervalMs,
       offsetsTopicNumPartitions = config.offsetsTopicPartitions,
+      // 50
       offsetsTopicSegmentBytes = config.offsetsTopicSegmentBytes,
+      // 3
       offsetsTopicReplicationFactor = config.offsetsTopicReplicationFactor,
       offsetsTopicCompressionCodec = config.offsetsTopicCompressionCodec,
+      // 500ms
       offsetCommitTimeoutMs = config.offsetCommitTimeoutMs,
+      // -1
       offsetCommitRequiredAcks = config.offsetCommitRequiredAcks)
     val groupConfig = GroupConfig(groupMinSessionTimeoutMs = config.groupMinSessionTimeoutMs,
       groupMaxSessionTimeoutMs = config.groupMaxSessionTimeoutMs)

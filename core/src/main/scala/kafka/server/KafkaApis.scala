@@ -87,12 +87,18 @@ class KafkaApis(val requestChannel: RequestChannel,
         // 更新元数据
         case ApiKeys.UPDATE_METADATA_KEY => handleUpdateMetadataRequest(request)
         case ApiKeys.CONTROLLED_SHUTDOWN_KEY => handleControlledShutdownRequest(request)
+        // 提交offset
         case ApiKeys.OFFSET_COMMIT => handleOffsetCommitRequest(request)
+        // 获取topicPartition的消费其实offset
         case ApiKeys.OFFSET_FETCH => handleOffsetFetchRequest(request)
+        // 消费者根据消费组（groupId）来获取协调节点
         case ApiKeys.GROUP_COORDINATOR => handleGroupCoordinatorRequest(request)
+        // 加入group请求，带着订阅的topic集合
         case ApiKeys.JOIN_GROUP => handleJoinGroupRequest(request)
+        // consumer的心跳请求
         case ApiKeys.HEARTBEAT => handleHeartbeatRequest(request)
         case ApiKeys.LEAVE_GROUP => handleLeaveGroupRequest(request)
+        // 发送sync分区方案请求
         case ApiKeys.SYNC_GROUP => handleSyncGroupRequest(request)
         case ApiKeys.DESCRIBE_GROUPS => handleDescribeGroupRequest(request)
         case ApiKeys.LIST_GROUPS => handleListGroupsRequest(request)
@@ -828,6 +834,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       val responseBody = new GroupCoordinatorResponse(Errors.GROUP_AUTHORIZATION_FAILED.code, Node.noNode)
       requestChannel.sendResponse(new RequestChannel.Response(request, new ResponseSend(request.connectionId, responseHeader, responseBody)))
     } else {
+      // 根据groupId进行hash，然后再对"__consumer_offsets"的分区数进行取模,得到对应的响应的partition
       val partition = coordinator.partitionFor(groupCoordinatorRequest.groupId)
 
       // get metadata (and create the topic if necessary)
@@ -836,6 +843,7 @@ class KafkaApis(val requestChannel: RequestChannel,
       val responseBody = if (offsetsTopicMetadata.error != Errors.NONE) {
         new GroupCoordinatorResponse(Errors.GROUP_COORDINATOR_NOT_AVAILABLE.code, Node.noNode)
       } else {
+        // 找到上面算出来的partition，他的leader节点，就是协调节点
         val coordinatorEndpoint = offsetsTopicMetadata.partitionMetadata().asScala
           .find(_.partition == partition)
           .map(_.leader())

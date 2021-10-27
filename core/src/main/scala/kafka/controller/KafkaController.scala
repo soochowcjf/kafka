@@ -339,6 +339,7 @@ class KafkaController(val config : KafkaConfig, zkUtils: ZkUtils, val brokerStat
       partitionStateMachine.registerListeners()
       // 注册BrokerChangeListener broker的变更，新增、宕机都会回调该监听器
       replicaStateMachine.registerListeners()
+      // 初始化controller上下文，如果controller宕机，重新选举了一个新的broker作为controller，那么就需要去zk中读取元数据存储到当前这个新的controller中
       initializeControllerContext()
       replicaStateMachine.startup()
       partitionStateMachine.startup()
