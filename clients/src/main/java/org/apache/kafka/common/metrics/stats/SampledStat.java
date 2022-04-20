@@ -16,6 +16,7 @@
  */
 package org.apache.kafka.common.metrics.stats;
 
+import java.sql.SQLOutput;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -34,8 +35,11 @@ import org.apache.kafka.common.metrics.MetricConfig;
  */
 public abstract class SampledStat implements MeasurableStat {
 
+    // 初始值
     private double initialValue;
+    // 当前样本index
     private int current = 0;
+    // 样本集合
     protected List<Sample> samples;
 
     public SampledStat(double initialValue) {
@@ -47,8 +51,11 @@ public abstract class SampledStat implements MeasurableStat {
     public void record(MetricConfig config, double value, long timeMs) {
         Sample sample = current(timeMs);
         if (sample.isComplete(timeMs, config))
+            // 移动样本窗口
             sample = advance(config, timeMs);
+        // 更新样本的值
         update(sample, config, value, timeMs);
+        // 样本数+1
         sample.eventCount += 1;
     }
 
@@ -60,6 +67,7 @@ public abstract class SampledStat implements MeasurableStat {
             return sample;
         } else {
             Sample sample = current(timeMs);
+            // 重置样本
             sample.reset(timeMs);
             return sample;
         }
@@ -126,6 +134,7 @@ public abstract class SampledStat implements MeasurableStat {
         }
 
         public boolean isComplete(long timeMs, MetricConfig config) {
+            // 时间已经过了窗口时间跨度 || 样本数过了窗口样本数
             return timeMs - lastWindowMs >= config.timeWindowMs() || eventCount >= config.eventWindow();
         }
     }

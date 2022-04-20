@@ -272,11 +272,14 @@ public class NetworkClient implements KafkaClient {
         }
         this.selector = selector;
         this.clientId = clientId;
+        // 默认5
         this.inFlightRequests = new InFlightRequests(maxInFlightRequestsPerConnection);
         this.connectionStates = new ClusterConnectionStates(
                 reconnectBackoffMs, reconnectBackoffMax,
                 connectionSetupTimeoutMs, connectionSetupTimeoutMaxMs, logContext, hostResolver);
+        // 默认128k
         this.socketSendBuffer = socketSendBuffer;
+        // 默认32k
         this.socketReceiveBuffer = socketReceiveBuffer;
         this.correlation = 0;
         this.randOffset = new Random();
@@ -307,6 +310,7 @@ public class NetworkClient implements KafkaClient {
             return true;
 
         if (connectionStates.canConnect(node.idString(), now))
+            // 初始化一个连接
             // if we are interested in sending to a node and we don't have a connection to it, initiate one
             initiateConnect(node, now);
 
@@ -447,8 +451,13 @@ public class NetworkClient implements KafkaClient {
      * @param now the current timestamp
      */
     private boolean canSendRequest(String node, long now) {
-        return connectionStates.isReady(node, now) && selector.isChannelReady(node) &&
-            inFlightRequests.canSendMore(node);
+        return
+                // 该node状态是READY，并且没有触发限流
+                connectionStates.isReady(node, now) &&
+                        // 负责底层通信的selector是ready状态，且用户认证通过
+                        selector.isChannelReady(node) &&
+                        // 飞行中的请求数没有超出设置
+                        inFlightRequests.canSendMore(node);
     }
 
     /**
@@ -469,6 +478,7 @@ public class NetworkClient implements KafkaClient {
 
     private void doSend(ClientRequest clientRequest, boolean isInternalRequest, long now) {
         ensureActive();
+        // 目的brokerId
         String nodeId = clientRequest.destination();
         if (!isInternalRequest) {
             // If this request came from outside the NetworkClient, validate
@@ -516,12 +526,15 @@ public class NetworkClient implements KafkaClient {
     }
 
     private void doSend(ClientRequest clientRequest, boolean isInternalRequest, long now, AbstractRequest request) {
+        // 目的brokerId
         String destination = clientRequest.destination();
+        // 构建请求头
         RequestHeader header = clientRequest.makeHeader(request.version());
         if (log.isDebugEnabled()) {
             log.debug("Sending {} request with header {} and timeout {} to node {}: {}",
                 clientRequest.apiKey(), header, clientRequest.requestTimeoutMs(), destination, request);
         }
+        // 构建请求体
         Send send = request.toSend(header);
         InFlightRequest inFlightRequest = new InFlightRequest(
                 clientRequest,
@@ -556,8 +569,10 @@ public class NetworkClient implements KafkaClient {
             return responses;
         }
 
+        // 元数据拉取
         long metadataTimeout = metadataUpdater.maybeUpdate(now);
         try {
+            //
             this.selector.poll(Utils.min(timeout, metadataTimeout, defaultRequestTimeoutMs));
         } catch (IOException e) {
             log.error("Unexpected error during I/O", e);
@@ -566,13 +581,26 @@ public class NetworkClient implements KafkaClient {
         // process completed actions
         long updatedNow = this.time.milliseconds();
         List<ClientResponse> responses = new ArrayList<>();
+
+        // 处理此次发送、且不需要接受响应的的请求，为他们构造response
         handleCompletedSends(responses, updatedNow);
+
+        // 处理接受到的响应，关联到对应的ClientRequest
         handleCompletedReceives(responses, updatedNow);
+
+        // 处理连接断开的情况
         handleDisconnections(responses, updatedNow);
+
+        // 处理新建立的连接
         handleConnections();
+
         handleInitiateApiVersionRequests(updatedNow);
         handleTimedOutConnections(responses, updatedNow);
+
+        // 处理超时的情况
         handleTimedOutRequests(responses, updatedNow);
+
+        // 响应回调
         completeResponses(responses);
 
         return responses;
@@ -981,9 +1009,11 @@ public class NetworkClient implements KafkaClient {
     private void initiateConnect(Node node, long now) {
         String nodeConnectionId = node.idString();
         try {
+            // 与该node节点的连接状态设置为CONNECTING
             connectionStates.connecting(nodeConnectionId, now, node.host(), clientDnsLookup);
             InetAddress address = connectionStates.currentAddress(nodeConnectionId);
             log.debug("Initiating connection to node {} using address {}", node, address);
+            // 向node节点建立连接
             selector.connect(nodeConnectionId,
                     new InetSocketAddress(address, node.port()),
                     this.socketSendBuffer,
@@ -1138,11 +1168,13 @@ public class NetworkClient implements KafkaClient {
                 Metadata.MetadataRequestAndVersion requestAndVersion = metadata.newMetadataRequestAndVersion(now);
                 MetadataRequest.Builder metadataRequest = requestAndVersion.requestBuilder;
                 log.debug("Sending metadata request {} to node {}", metadataRequest, node);
+                // 发送拉取元数据的请求到broker
                 sendInternalMetadataRequest(metadataRequest, nodeConnectionId, now);
                 inProgress = new InProgressData(requestAndVersion.requestVersion, requestAndVersion.isPartialUpdate);
                 return defaultRequestTimeoutMs;
             }
 
+            // 如果有正在与该node节点建立的连接，那么就不能再继续建立连接了
             // If there's any connection establishment underway, wait until it completes. This prevents
             // the client from unnecessarily connecting to additional nodes while a previous connection
             // attempt has not been completed.

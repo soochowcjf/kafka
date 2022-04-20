@@ -252,6 +252,7 @@ object ReassignPartitionsCommand extends Logging {
         opts.options.valueOf(opts.brokerListOpt),
         !opts.options.has(opts.disableRackAware))
     } else if (opts.options.has(opts.executeOpt)) {
+      // 执行
       executeAssignment(adminClient,
         opts.options.has(opts.additionalOpt),
         Utils.readFileAsString(opts.options.valueOf(opts.reassignmentJsonFileOpt)),
@@ -259,6 +260,7 @@ object ReassignPartitionsCommand extends Logging {
         opts.options.valueOf(opts.replicaAlterLogDirsThrottleOpt),
         opts.options.valueOf(opts.timeoutOpt))
     } else if (opts.options.has(opts.cancelOpt)) {
+      // 取消
       cancelAssignment(adminClient,
         Utils.readFileAsString(opts.options.valueOf(opts.reassignmentJsonFileOpt)),
         opts.options.has(opts.preserveThrottlesOpt),
@@ -277,11 +279,15 @@ object ReassignPartitionsCommand extends Logging {
         Utils.readFileAsString(opts.options.valueOf(opts.reassignmentJsonFileOpt)),
         opts.options.has(opts.preserveThrottlesOpt))
     } else if (opts.options.has(opts.generateOpt)) {
+      // 生成分区分配方案
       generateAssignment(zkClient,
+        // 从文件中读取的需要迁移的topic
         Utils.readFileAsString(opts.options.valueOf(opts.topicsToMoveJsonFileOpt)),
+        // 迁移至的broker集合
         opts.options.valueOf(opts.brokerListOpt),
         !opts.options.has(opts.disableRackAware))
     } else if (opts.options.has(opts.executeOpt)) {
+      // 执行重平衡方案
       executeAssignment(zkClient,
         Utils.readFileAsString(opts.options.valueOf(opts.reassignmentJsonFileOpt)),
         opts.options.valueOf(opts.interBrokerThrottleOpt))
@@ -776,8 +782,11 @@ object ReassignPartitionsCommand extends Logging {
                          brokerListString: String,
                          enableRackAwareness: Boolean)
                          : (Map[TopicPartition, Seq[Int]], Map[TopicPartition, Seq[Int]]) = {
-    val (brokersToReassign, topicsToReassign) =
+    val (brokersToReassign, topicsToReassign) = {
+      //  reassignmentJson:{"topics": [{"topic": "foo1"},{"topic": "foo2"}], "version":1}
+      //  brokerListString:0,1,2
       parseGenerateAssignmentArgs(reassignmentJson, brokerListString)
+    }
     val currentAssignments = zkClient.getReplicaAssignmentForTopics(topicsToReassign.toSet)
     val brokerMetadatas = getBrokerMetadata(zkClient, brokersToReassign, enableRackAwareness)
     val proposedAssignments = calculateAssignment(currentAssignments, brokerMetadatas)
@@ -799,10 +808,16 @@ object ReassignPartitionsCommand extends Logging {
   def calculateAssignment(currentAssignment: Map[TopicPartition, Seq[Int]],
                           brokerMetadatas: Seq[BrokerMetadata])
                           : Map[TopicPartition, Seq[Int]] = {
+    //{"version":1,"partitions":[
+    //  {"topic":"log-topic","partition":0,"replicas":[0],"log_dirs":["any"]},
+    //  {"topic":"log-topic","partition":1,"replicas":[0],"log_dirs":["any"]},
+    //  {"topic":"log-topic","partition":2,"replicas":[0],"log_dirs":["any"]}
+    // ]}
     val groupedByTopic = currentAssignment.groupBy { case (tp, _) => tp.topic }
     val proposedAssignments = mutable.Map[TopicPartition, Seq[Int]]()
     groupedByTopic.forKeyValue { (topic, assignment) =>
       val (_, replicas) = assignment.head
+      // 按照当前的分区数、副本数重新进行分区分配
       val assignedReplicas = AdminUtils.
         assignReplicasToBrokers(brokerMetadatas, assignment.size, replicas.size)
       proposedAssignments ++= assignedReplicas.map { case (partition, replicas) =>
@@ -971,6 +986,7 @@ object ReassignPartitionsCommand extends Logging {
 
       if (interBrokerThrottle >= 0) {
         val moveMap = calculateProposedMoveMap(currentReassignments, proposedParts, currentParts)
+        // 设置限流速率
         modifyReassignmentThrottle(adminClient, moveMap, interBrokerThrottle)
       }
 
@@ -980,6 +996,7 @@ object ReassignPartitionsCommand extends Logging {
       }
     }
 
+    // 执行副本重分配
     // Execute the partition reassignments.
     val errors = alterPartitionReassignments(adminClient, proposedParts)
     if (errors.nonEmpty) {
@@ -993,6 +1010,7 @@ object ReassignPartitionsCommand extends Logging {
       if (proposedParts.size == 1) "" else "s",
       proposedParts.keySet.toBuffer.sortWith(compareTopicPartitions).mkString(",")))
     if (proposedReplicas.nonEmpty) {
+      // 执行目录迁移
       executeMoves(adminClient, proposedReplicas, timeoutMs, time)
     }
   }
@@ -1487,6 +1505,12 @@ object ReassignPartitionsCommand extends Logging {
    */
   def parseExecuteAssignmentArgs(reassignmentJson: String)
       : (Map[TopicPartition, Seq[Int]], Map[TopicPartitionReplica, String]) = {
+
+    //{"version":1,"partitions":[
+    //  {"topic":"log-topic","partition":0,"replicas":[0],"log_dirs":["any"]},
+    //  {"topic":"log-topic","partition":1,"replicas":[0],"log_dirs":["any"]},
+    //  {"topic":"log-topic","partition":2,"replicas":[0],"log_dirs":["any"]}
+    // ]}
     val (partitionsToBeReassigned, replicaAssignment) = parsePartitionReassignmentData(reassignmentJson)
     if (partitionsToBeReassigned.isEmpty)
       throw new AdminCommandFailedException("Partition reassignment list cannot be empty")

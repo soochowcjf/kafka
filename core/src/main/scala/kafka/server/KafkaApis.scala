@@ -2727,6 +2727,11 @@ class KafkaApis(val requestChannel: RequestChannel,
         .setResults((authorizedConfigs ++ unauthorizedConfigs).asJava)))
   }
 
+  /**
+   * 修改副本的logDirs
+   *
+   * @param request
+   */
   def handleAlterReplicaLogDirsRequest(request: RequestChannel.Request): Unit = {
     val alterReplicaDirsRequest = request.body[AlterReplicaLogDirsRequest]
     if (authHelper.authorize(request.context, ALTER, CLUSTER, CLUSTER_NAME)) {
@@ -2963,6 +2968,7 @@ class KafkaApis(val requestChannel: RequestChannel,
 
       sendResponseCallback(error)(partitionErrors)
     } else {
+      // 如果没传topicPartitions，就是所有的topicPartition
       val partitions = if (electionRequest.data.topicPartitions == null) {
         metadataCache.getAllPartitions()
       } else {

@@ -375,6 +375,7 @@ class ReplicaManager(val config: KafkaConfig,
 
         val stoppedPartitions = mutable.Map.empty[TopicPartition, Boolean]
         partitionStates.forKeyValue { (topicPartition, partitionState) =>
+          // 是否删除数据
           val deletePartition = partitionState.deletePartition()
 
           getPartition(topicPartition) match {
@@ -485,6 +486,7 @@ class ReplicaManager(val config: KafkaConfig,
     // Third delete the logs and checkpoint.
     val errorMap = new mutable.HashMap[TopicPartition, Throwable]()
     if (partitionsToDelete.nonEmpty) {
+      // 异步删除logs文件和checkpoint
       // Delete the logs and checkpoint.
       logManager.asyncDelete(partitionsToDelete, (tp, e) => errorMap.put(tp, e))
     }
@@ -1406,10 +1408,11 @@ class ReplicaManager(val config: KafkaConfig,
           val partitionsToBeFollower = partitionStates.filter { case (k, _) => !partitionsToBeLeader.contains(k) }
 
           val highWatermarkCheckpoints = new LazyOffsetCheckpoints(this.highWatermarkCheckpoints)
-          val partitionsBecomeLeader = if (partitionsToBeLeader.nonEmpty)
+          val partitionsBecomeLeader = if (partitionsToBeLeader.nonEmpty) {
+            // 成为leader
             makeLeaders(controllerId, controllerEpoch, partitionsToBeLeader, correlationId, responseMap,
               highWatermarkCheckpoints)
-          else
+          } else
             Set.empty[Partition]
           val partitionsBecomeFollower = if (partitionsToBeFollower.nonEmpty)
             makeFollowers(controllerId, controllerEpoch, partitionsToBeFollower, correlationId, responseMap,

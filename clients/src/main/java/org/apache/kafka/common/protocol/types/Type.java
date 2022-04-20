@@ -446,6 +446,7 @@ public abstract class Type {
             byte[] bytes = Utils.utf8((String) o);
             if (bytes.length > Short.MAX_VALUE)
                 throw new SchemaException("String length " + bytes.length + " is larger than the maximum string length.");
+            // 前两个字节是该字符串的长度
             buffer.putShort((short) bytes.length);
             buffer.put(bytes);
         }
@@ -675,6 +676,7 @@ public abstract class Type {
         public void write(ByteBuffer buffer, Object o) {
             ByteBuffer arg = (ByteBuffer) o;
             int pos = arg.position();
+            // 前四个字节是长度域
             buffer.putInt(arg.remaining());
             buffer.put(arg);
             arg.position(pos);
@@ -1000,6 +1002,7 @@ public abstract class Type {
                 return 4;
 
             BaseRecords records = (BaseRecords) o;
+            // 4字节的长度域+实际字节的数量
             return 4 + records.sizeInBytes();
         }
 

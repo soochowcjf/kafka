@@ -17,7 +17,10 @@ repositories {
   repositories {
     // For license plugin.
     maven {
-      url 'https://dl.bintray.com/content/netflixoss/external-gradle-plugins/'
+//      url 'https://dl.bintray.com/content/netflixoss/external-gradle-plugians/'
+      url 'http://maven.aliyun.com/nexus/content/groups/public/'
     }
+
+//    flatDir {dirs 'libs'}
   }
 }

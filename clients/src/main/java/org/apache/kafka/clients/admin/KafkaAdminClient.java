@@ -2323,10 +2323,14 @@ public class KafkaAdminClient extends AdminClient {
         for (TopicPartitionReplica replica : replicaAssignment.keySet())
             futures.put(replica, new KafkaFutureImpl<>());
 
+        // 构建每个broker的请求
         Map<Integer, AlterReplicaLogDirsRequestData> replicaAssignmentByBroker = new HashMap<>();
         for (Map.Entry<TopicPartitionReplica, String> entry: replicaAssignment.entrySet()) {
+            // 副本
             TopicPartitionReplica replica = entry.getKey();
+            // 目录
             String logDir = entry.getValue();
+            // brokerId
             int brokerId = replica.brokerId();
             AlterReplicaLogDirsRequestData value = replicaAssignmentByBroker.computeIfAbsent(brokerId,
                 key -> new AlterReplicaLogDirsRequestData());
@@ -3565,9 +3569,12 @@ public class KafkaAdminClient extends AdminClient {
         final Map<TopicPartition, KafkaFutureImpl<Void>> futures = new HashMap<>();
         final Map<String, Map<Integer, Optional<NewPartitionReassignment>>> topicsToReassignments = new TreeMap<>();
         for (Map.Entry<TopicPartition, Optional<NewPartitionReassignment>> entry : reassignments.entrySet()) {
+            // topic
             String topic = entry.getKey().topic();
+            // partition
             int partition = entry.getKey().partition();
             TopicPartition topicPartition = new TopicPartition(topic, partition);
+            // 新的副本
             Optional<NewPartitionReassignment> reassignment = entry.getValue();
             KafkaFutureImpl<Void> future = new KafkaFutureImpl<>();
             futures.put(topicPartition, future);

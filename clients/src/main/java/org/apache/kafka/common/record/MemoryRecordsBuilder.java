@@ -704,6 +704,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
         if (timestampType == TimestampType.LOG_APPEND_TIME)
             timestamp = logAppendTime;
         long crc = LegacyRecord.write(appendStream, magic, timestamp, key, value, CompressionType.NONE, timestampType);
+        // 记录写入的数据
         recordWritten(offset, timestamp, size + Records.LOG_OVERHEAD);
         return crc;
     }

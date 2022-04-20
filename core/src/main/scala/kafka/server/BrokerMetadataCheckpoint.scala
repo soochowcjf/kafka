@@ -150,7 +150,14 @@ object BrokerMetadataCheckpoint extends Logging {
     val brokerMetadataMap = mutable.HashMap[String, Properties]()
     val offlineDirs = mutable.ArrayBuffer.empty[String]
 
+    // 所有的目录，例如/data/kafka/data,/data1/kafka/data
     for (logDir <- logDirs) {
+      //[sys_su@ip-10-21-41-242 data]$ cat meta.properties
+      //#
+      //#Wed Jan 26 04:12:54 UTC 2022
+      //broker.id=2
+      //version=0
+      //cluster.id=cWd8QIX6RViYfqfFvKTDsw
       val brokerCheckpointFile = new File(logDir, "meta.properties")
       val brokerCheckpoint = new BrokerMetadataCheckpoint(brokerCheckpointFile)
 
@@ -174,6 +181,7 @@ object BrokerMetadataCheckpoint extends Logging {
     if (brokerMetadataMap.isEmpty) {
       (new RawMetaProperties(), offlineDirs)
     } else {
+      // 多个目录下的配置meta.properties应该是一样的
       val numDistinctMetaProperties = brokerMetadataMap.values.toSet.size
       if (numDistinctMetaProperties > 1) {
         val builder = new StringBuilder

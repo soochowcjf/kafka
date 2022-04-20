@@ -67,6 +67,7 @@ class ControllerChannelManager(controllerContext: ControllerContext,
   )
 
   def startup() = {
+    // controller节点会与所有其他broker建立连接
     controllerContext.liveOrShuttingDownBrokers.foreach(addNewBroker)
 
     brokerLock synchronized {
@@ -335,10 +336,16 @@ class ControllerBrokerRequestBatch(config: KafkaConfig,
 abstract class AbstractControllerBrokerRequestBatch(config: KafkaConfig,
                                                     controllerContext: ControllerContext,
                                                     stateChangeLogger: StateChangeLogger) extends Logging {
+  // 当前broker id
   val controllerId: Int = config.brokerId
+  // leaderAndIsr请求
   val leaderAndIsrRequestMap = mutable.Map.empty[Int, mutable.Map[TopicPartition, LeaderAndIsrPartitionState]]
+  // stopReplica请求
   val stopReplicaRequestMap = mutable.Map.empty[Int, mutable.Map[TopicPartition, StopReplicaPartitionState]]
+
+  // 需要发送updateMetadata请求的broker集合
   val updateMetadataRequestBrokerSet = mutable.Set.empty[Int]
+  // updateMetadata请求
   val updateMetadataRequestPartitionInfoMap = mutable.Map.empty[TopicPartition, UpdateMetadataPartitionState]
 
   def sendEvent(event: ControllerEvent): Unit
@@ -392,6 +399,7 @@ abstract class AbstractControllerBrokerRequestBatch(config: KafkaConfig,
         .setIsNew(isNew || alreadyNew))
     }
 
+    // 发送更新元数据请求，是发给所有的broker的
     addUpdateMetadataRequestForBrokers(controllerContext.liveOrShuttingDownBrokerIds.toSeq, Set(topicPartition))
   }
 
@@ -425,11 +433,14 @@ abstract class AbstractControllerBrokerRequestBatch(config: KafkaConfig,
     def updateMetadataRequestPartitionInfo(partition: TopicPartition, beingDeleted: Boolean): Unit = {
       controllerContext.partitionLeadershipInfo(partition) match {
         case Some(LeaderIsrAndControllerEpoch(leaderAndIsr, controllerEpoch)) =>
+          // 这个partition对应的副本们
           val replicas = controllerContext.partitionReplicaAssignment(partition)
           val offlineReplicas = replicas.filter(!controllerContext.isReplicaOnline(_, partition))
-          val updatedLeaderAndIsr =
+          val updatedLeaderAndIsr = {
+            // 如果处于被删除中，那么leader=-2
             if (beingDeleted) LeaderAndIsr.duringDelete(leaderAndIsr.isr)
             else leaderAndIsr
+          }
 
           val partitionStateInfo = new UpdateMetadataPartitionState()
             .setTopicName(partition.topic)
@@ -577,9 +588,11 @@ abstract class AbstractControllerBrokerRequestBatch(config: KafkaConfig,
           partitionErrorsForDeletingTopics += tp -> Errors.forCode(pe.errorCode)
         }
       }
-      if (partitionErrorsForDeletingTopics.nonEmpty)
+      if (partitionErrorsForDeletingTopics.nonEmpty) {
+        // 发送stopReplica响应，返回没有异常
         sendEvent(TopicDeletionStopReplicaResponseReceived(brokerId, stopReplicaResponse.error,
           partitionErrorsForDeletingTopics))
+      }
     }
 
     stopReplicaRequestMap.forKeyValue { (brokerId, partitionStates) =>

@@ -126,6 +126,7 @@ public class JmxReporter implements MetricsReporter {
 
             mbeans.forEach((name, mbean) -> {
                 if (mbeanPredicate.test(name)) {
+                    // 注册mbean到jmx
                     reregister(mbean);
                 }
             });
@@ -173,6 +174,7 @@ public class JmxReporter implements MetricsReporter {
     private String addAttribute(KafkaMetric metric) {
         try {
             MetricName metricName = metric.metricName();
+            // producer端是：kafka.producer
             String mBeanName = getMBeanName(prefix, metricName);
             if (!this.mbeans.containsKey(mBeanName))
                 mbeans.put(mBeanName, new KafkaMbean(mBeanName));
@@ -250,6 +252,7 @@ public class JmxReporter implements MetricsReporter {
         @Override
         public Object getAttribute(String name) throws AttributeNotFoundException {
             if (this.metrics.containsKey(name))
+                // 获取指标值
                 return this.metrics.get(name).metricValue();
             else
                 throw new AttributeNotFoundException("Could not find attribute " + name);

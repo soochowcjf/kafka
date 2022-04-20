@@ -90,6 +90,10 @@ object AdminUtils extends Logging {
    * </p>
    * <br>
    * <p>
+   *   如果副本数等于或者大于机架数，那么每个机架都会存在至少一个副本
+   *   否则的话，每个机架最多一个副本
+   *   在副本数和机架数数量相同的情况下，他会保证副本在broker和机架上均匀分布
+   *
    * As the result, if the number of replicas is equal to or greater than the number of racks, it will ensure that
    * each rack will get at least one replica. Otherwise, each rack will get at most one replica. In a perfect
    * situation where the number of replicas is the same as the number of racks and each rack has the same number of
@@ -109,71 +113,127 @@ object AdminUtils extends Logging {
       throw new InvalidPartitionsException("Number of partitions must be larger than 0.")
     if (replicationFactor <= 0)
       throw new InvalidReplicationFactorException("Replication factor must be larger than 0.")
+
+    // 如果副本因子 > broker的数量，那么是不允许的
     if (replicationFactor > brokerMetadatas.size)
       throw new InvalidReplicationFactorException(s"Replication factor: $replicationFactor larger than available brokers: ${brokerMetadatas.size}.")
-    if (brokerMetadatas.forall(_.rack.isEmpty))
+    if (brokerMetadatas.forall(_.rack.isEmpty)) {
+      // 不需要机架感知的副本分配
       assignReplicasToBrokersRackUnaware(nPartitions, replicationFactor, brokerMetadatas.map(_.id), fixedStartIndex,
         startPartitionId)
-    else {
+    } else {
       if (brokerMetadatas.exists(_.rack.isEmpty))
         throw new AdminOperationException("Not all brokers have rack information for replica rack aware assignment.")
+      // 机架感知的副本分配
       assignReplicasToBrokersRackAware(nPartitions, replicationFactor, brokerMetadatas, fixedStartIndex,
         startPartitionId)
     }
   }
 
+  /**
+   * 没有机架的副本分配
+   *
+   * @param nPartitions
+   * @param replicationFactor
+   * @param brokerList
+   * @param fixedStartIndex
+   * @param startPartitionId
+   * @return
+   */
   private def assignReplicasToBrokersRackUnaware(nPartitions: Int,
                                                  replicationFactor: Int,
                                                  brokerList: Seq[Int],
                                                  fixedStartIndex: Int,
                                                  startPartitionId: Int): Map[Int, Seq[Int]] = {
     val ret = mutable.Map[Int, Seq[Int]]()
+    // 所有的broker的id集合
     val brokerArray = brokerList.toArray
+    // 起始index 假设random=0
     val startIndex = if (fixedStartIndex >= 0) fixedStartIndex else rand.nextInt(brokerArray.length)
+    // 0
     var currentPartitionId = math.max(0, startPartitionId)
+    // 下一个副本的shift 假设random=0
     var nextReplicaShift = if (fixedStartIndex >= 0) fixedStartIndex else rand.nextInt(brokerArray.length)
+    // 分配partition
     for (_ <- 0 until nPartitions) {
       if (currentPartitionId > 0 && (currentPartitionId % brokerArray.length == 0))
         nextReplicaShift += 1
+      // 第一个副本所在的broker
       val firstReplicaIndex = (currentPartitionId + startIndex) % brokerArray.length
       val replicaBuffer = mutable.ArrayBuffer(brokerArray(firstReplicaIndex))
-      for (j <- 0 until replicationFactor - 1)
+      for (j <- 0 until replicationFactor - 1) {
+        // 分配副本
         replicaBuffer += brokerArray(replicaIndex(firstReplicaIndex, nextReplicaShift, j, brokerArray.length))
+      }
       ret.put(currentPartitionId, replicaBuffer)
       currentPartitionId += 1
     }
     ret
   }
 
+  /**
+   * 机架感知的副本分配
+   *
+   * @param nPartitions
+   * @param replicationFactor
+   * @param brokerMetadatas
+   * @param fixedStartIndex
+   * @param startPartitionId
+   * @return
+   */
   private def assignReplicasToBrokersRackAware(nPartitions: Int,
                                                replicationFactor: Int,
                                                brokerMetadatas: Seq[BrokerMetadata],
                                                fixedStartIndex: Int,
                                                startPartitionId: Int): Map[Int, Seq[Int]] = {
+    // brokerId => rack 的对应关系map
+    //     broker-0 => 机架1
+    //     broker-1 => 机架3
+    //     broker-2 => 机架3
+    //     broker-3 => 机架2
+    //     broker-4 => 机架2
+    //     broker-5 => 机架1
     val brokerRackMap = brokerMetadatas.collect { case BrokerMetadata(id, Some(rack)) =>
       id -> rack
     }.toMap
+    // 机架的数量,3个
     val numRacks = brokerRackMap.values.toSet.size
+    // 获取按照机架排列好的broker列表 0，3，1，5，4，2
     val arrangedBrokerList = getRackAlternatedBrokerList(brokerRackMap)
     val numBrokers = arrangedBrokerList.size
     val ret = mutable.Map[Int, Seq[Int]]()
+    // 起始index 假设random=0
     val startIndex = if (fixedStartIndex >= 0) fixedStartIndex else rand.nextInt(arrangedBrokerList.size)
+    // 0
     var currentPartitionId = math.max(0, startPartitionId)
+    // 下一个副本的shift 假设random=0
     var nextReplicaShift = if (fixedStartIndex >= 0) fixedStartIndex else rand.nextInt(arrangedBrokerList.size)
+    // 所有的partition数
     for (_ <- 0 until nPartitions) {
       if (currentPartitionId > 0 && (currentPartitionId % arrangedBrokerList.size == 0))
         nextReplicaShift += 1
+      // （0+0）% 6=0
       val firstReplicaIndex = (currentPartitionId + startIndex) % arrangedBrokerList.size
+      // leader broker
       val leader = arrangedBrokerList(firstReplicaIndex)
       val replicaBuffer = mutable.ArrayBuffer(leader)
+      // 该partition的副本们所在的机架
       val racksWithReplicas = mutable.Set(brokerRackMap(leader))
+      // 该partition所在的broker
       val brokersWithReplicas = mutable.Set(leader)
       var k = 0
       for (_ <- 0 until replicationFactor - 1) {
         var done = false
         while (!done) {
+          // 为leader partition分配副本，找出其所在的broker
           val broker = arrangedBrokerList(replicaIndex(firstReplicaIndex, nextReplicaShift * numRacks, k, arrangedBrokerList.size))
+          // 找出该broker所在的机架
           val rack = brokerRackMap(broker)
+          // 跳过这个broker，如果
+          // 1.该机架上已经有一个broker分配了该topic的一个副本，并且存在其他机架还没有分配副本
+          // 或者
+          // 2.该broker已经分配了一个该topic的一个副本，并且存在其他broker还没有分配副本
+
           // Skip this broker if
           // 1. there is already a broker in the same rack that has assigned a replica AND there is one or more racks
           //    that do not have any replica, or
@@ -210,9 +270,11 @@ object AdminUtils extends Logging {
     * distributed to all racks.
     */
   private[admin] def getRackAlternatedBrokerList(brokerRackMap: Map[Int, String]): IndexedSeq[Int] = {
+    // 机架id =》 机架上的broker集合
     val brokersIteratorByRack = getInverseMap(brokerRackMap).map { case (rack, brokers) =>
       (rack, brokers.iterator)
     }
+    // 将机架排序
     val racks = brokersIteratorByRack.keys.toArray.sorted
     val result = new mutable.ArrayBuffer[Int]
     var rackIndex = 0
@@ -231,8 +293,36 @@ object AdminUtils extends Logging {
       .map { case (rack, rackAndIdList) => (rack, rackAndIdList.map { case (_, id) => id }.sorted) }
   }
 
+  // 机架感知的分配
+  // 0，0，0，6
+  // 0，0，1，6
+
+  // 假设partition数是7
+  // 6，3，0，6
+
+  // 没有机架感知的分配
+  // 0，0，0，6
+  // 0，0，1，6
   private def replicaIndex(firstReplicaIndex: Int, secondReplicaShift: Int, replicaIndex: Int, nBrokers: Int): Int = {
+    // 机架感知的分配
+    // 1+（0+0）%（6-1）=1
+    // 1+（0+1）%（6-1）=2
+
+    // 1+（3+0）%（6-1）=4
+
+    // 没有机架感知的分配
+    // 1+（0+0）%（6-1）=1
+    // 1+（0+1）%（6-1）=2
+    // 计算相对第一个副本的偏移量
     val shift = 1 + (secondReplicaShift + replicaIndex) % (nBrokers - 1)
+
+    // 机架感知的分配
+    // （0+1）%6=1
+    // （0+2）%6=2
+
+    // 没有机架感知的分配
+    // （0+1）%6=1
+    // （0+2）%6=2
     (firstReplicaIndex + shift) % nBrokers
   }
 

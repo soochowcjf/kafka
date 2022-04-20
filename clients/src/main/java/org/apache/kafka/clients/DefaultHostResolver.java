@@ -26,4 +26,9 @@ public class DefaultHostResolver implements HostResolver {
     public InetAddress[] resolve(String host) throws UnknownHostException {
         return InetAddress.getAllByName(host);
     }
+
+    public static void main(String[] args)throws Exception {
+
+        System.out.println(InetAddress.getAllByName("127.0.0.1")[0].toString());
+    }
 }

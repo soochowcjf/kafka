@@ -34,6 +34,7 @@ abstract class ReplicaStateMachine(controllerContext: ControllerContext) extends
    * Invoked on successful controller election.
    */
   def startup(): Unit = {
+    // 初始化副本的状态
     info("Initializing replica state")
     initializeReplicaState()
     info("Triggering online replica state changes")
@@ -57,10 +58,14 @@ abstract class ReplicaStateMachine(controllerContext: ControllerContext) extends
    */
   private def initializeReplicaState(): Unit = {
     controllerContext.allPartitions.foreach { partition =>
+      // 这个partition所有的副本们
       val replicas = controllerContext.partitionReplicaAssignment(partition)
+      // 遍历每个partition的所有副本
       replicas.foreach { replicaId =>
         val partitionAndReplica = PartitionAndReplica(partition, replicaId)
         if (controllerContext.isReplicaOnline(replicaId, partition)) {
+        // 如果这个副本所在的brokerId是online状态，那么这个副本的初始状态就是OnlineReplica
+          // 初始状态 OnlineReplica
           controllerContext.putReplicaState(partitionAndReplica, OnlineReplica)
         } else {
           // mark replicas on dead brokers as failed for topic deletion, if they belong to a topic to be deleted.
@@ -108,6 +113,7 @@ class ZkReplicaStateMachine(config: KafkaConfig,
     if (replicas.nonEmpty) {
       try {
         controllerBrokerRequestBatch.newBatch()
+        // 按照副本所在的brokerId进行分组
         replicas.groupBy(_.replica).forKeyValue { (replicaId, replicas) =>
           doHandleStateChanges(replicaId, replicas, targetState)
         }
@@ -191,8 +197,11 @@ class ZkReplicaStateMachine(config: KafkaConfig,
           }
         }
       case OnlineReplica =>
+        // 遍历所有有效的副本
         validReplicas.foreach { replica =>
+          // 该副本的topicPartition
           val partition = replica.topicPartition
+          // 该副本当前的状态
           val currentState = controllerContext.replicaState(replica)
 
           currentState match {
@@ -206,6 +215,7 @@ class ZkReplicaStateMachine(config: KafkaConfig,
             case _ =>
               controllerContext.partitionLeadershipInfo(partition) match {
                 case Some(leaderIsrAndControllerEpoch) =>
+                  // 发送 LeaderAndIsr
                   controllerBrokerRequestBatch.addLeaderAndIsrRequestForBrokers(Seq(replicaId),
                     replica.topicPartition,
                     leaderIsrAndControllerEpoch,
@@ -219,16 +229,21 @@ class ZkReplicaStateMachine(config: KafkaConfig,
         }
       case OfflineReplica =>
         validReplicas.foreach { replica =>
+          // 发送StopReplicaRequest
           controllerBrokerRequestBatch.addStopReplicaRequestForBrokers(Seq(replicaId), replica.topicPartition, deletePartition = false)
         }
+        // 按照分区是否在 "/brokers/topics/${topic}/partitions/${partition}/state" 下有leader isr信息，进行分组
         val (replicasWithLeadershipInfo, replicasWithoutLeadershipInfo) = validReplicas.partition { replica =>
           controllerContext.partitionLeadershipInfo(replica.topicPartition).isDefined
         }
+        // 将该replicaId从ISR列表中删除
         val updatedLeaderIsrAndControllerEpochs = removeReplicasFromIsr(replicaId, replicasWithLeadershipInfo.map(_.topicPartition))
         updatedLeaderIsrAndControllerEpochs.forKeyValue { (partition, leaderIsrAndControllerEpoch) =>
           stateLogger.info(s"Partition $partition state changed to $leaderIsrAndControllerEpoch after removing replica $replicaId from the ISR as part of transition to $OfflineReplica")
           if (!controllerContext.isTopicQueuedUpForDeletion(partition.topic)) {
+            // 移除replicaId，剩下的isr
             val recipients = controllerContext.partitionReplicaAssignment(partition).filterNot(_ == replicaId)
+            // 发送 LeaderAndIsr
             controllerBrokerRequestBatch.addLeaderAndIsrRequestForBrokers(recipients,
               partition,
               leaderIsrAndControllerEpoch,
@@ -297,6 +312,7 @@ class ZkReplicaStateMachine(config: KafkaConfig,
     partitions: Seq[TopicPartition]
   ): Map[TopicPartition, LeaderIsrAndControllerEpoch] = {
     var results = Map.empty[TopicPartition, LeaderIsrAndControllerEpoch]
+    // 还剩下需要的topicPartition
     var remaining = partitions
     while (remaining.nonEmpty) {
       val (finishedRemoval, removalsToRetry) = doRemoveReplicasFromIsr(replicaId, remaining)
@@ -331,7 +347,9 @@ class ZkReplicaStateMachine(config: KafkaConfig,
     replicaId: Int,
     partitions: Seq[TopicPartition]
   ): (Map[TopicPartition, Either[Exception, LeaderIsrAndControllerEpoch]], Seq[TopicPartition]) = {
+    // 从"/brokers/topics/${topic}/partitions/${partition}/state"下获取leader isr信息
     val (leaderAndIsrs, partitionsWithNoLeaderAndIsrInZk) = getTopicPartitionStatesFromZk(partitions)
+    // 根据isr列表中是否包含该replicaId，进行分组
     val (leaderAndIsrsWithReplica, leaderAndIsrsWithoutReplica) = leaderAndIsrs.partition { case (_, result) =>
       result.map { leaderAndIsr =>
         leaderAndIsr.isr.contains(replicaId)
@@ -341,12 +359,16 @@ class ZkReplicaStateMachine(config: KafkaConfig,
     val adjustedLeaderAndIsrs: Map[TopicPartition, LeaderAndIsr] = leaderAndIsrsWithReplica.flatMap {
       case (partition, result) =>
         result.toOption.map { leaderAndIsr =>
+          // 如果replicaId == leader，那么newLeader = -1
           val newLeader = if (replicaId == leaderAndIsr.leader) LeaderAndIsr.NoLeader else leaderAndIsr.leader
+          // 如果isr列表只有1的话，isr就不变；
+          // 否则，isr列表就是剔除replicaId后的列表
           val adjustedIsr = if (leaderAndIsr.isr.size == 1) leaderAndIsr.isr else leaderAndIsr.isr.filter(_ != replicaId)
           partition -> leaderAndIsr.newLeaderAndIsr(newLeader, adjustedIsr)
         }
     }
 
+    // 更新zk "/brokers/topics/${topic}/partitions/${partition}/state"下的leader isr信息
     val UpdateLeaderAndIsrResult(finishedPartitions, updatesToRetry) = zkClient.updateLeaderAndIsr(
       adjustedLeaderAndIsrs, controllerContext.epoch, controllerContext.epochZkVersion)
 
@@ -365,6 +387,7 @@ class ZkReplicaStateMachine(config: KafkaConfig,
       (leaderAndIsrsWithoutReplica ++ finishedPartitions).map { case (partition, result) =>
         (partition, result.map { leaderAndIsr =>
           val leaderIsrAndControllerEpoch = LeaderIsrAndControllerEpoch(leaderAndIsr, controllerContext.epoch)
+          // 更新controllerContext中新的leader isr信息
           controllerContext.putPartitionLeadershipInfo(partition, leaderIsrAndControllerEpoch)
           leaderIsrAndControllerEpoch
         })

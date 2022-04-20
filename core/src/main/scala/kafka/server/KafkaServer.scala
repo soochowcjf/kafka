@@ -248,6 +248,7 @@ class KafkaServer(
           new ZkConfigRepository(new AdminZkClient(zkClient)),
           kafkaScheduler, time, brokerTopicStats, logDirFailureChannel, config.usesTopicId)
         brokerState.set(BrokerState.RECOVERY)
+        // 启动logManager
         logManager.startup(zkClient.getAllTopicsInCluster())
 
         metadataCache = MetadataCache.zkMetadataCache(config.brokerId)
@@ -305,6 +306,7 @@ class KafkaServer(
         replicaManager.startup()
 
         val brokerInfo = createBrokerInfo
+        // 往zk中注册brokerInfo
         val brokerEpoch = zkClient.registerBroker(brokerInfo)
 
         // Now that the broker is successfully registered, checkpoint its metadata

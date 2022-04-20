@@ -21,6 +21,8 @@ import org.apache.kafka.common.metrics.MetricConfig;
 import java.util.List;
 
 /**
+ * 采样版本的 CumulativeSum
+ *
  * A {@link SampledStat} that maintains the sum of what it has seen.
  * This is a sampled version of {@link CumulativeSum}.
  *

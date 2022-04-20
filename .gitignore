@@ -59,3 +59,5 @@ streams/src/generated
 raft/src/generated
 core/src/generated
 metadata/src/generated
+
+kafka-logs

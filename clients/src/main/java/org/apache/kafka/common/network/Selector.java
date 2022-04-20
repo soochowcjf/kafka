@@ -103,6 +103,7 @@ public class Selector implements Selectable, AutoCloseable {
 
     private final Logger log;
     private final java.nio.channels.Selector nioSelector;
+    // 保存每个与每个broker的连接
     private final Map<String, KafkaChannel> channels;
     private final Set<KafkaChannel> explicitlyMutedChannels;
     private boolean outOfMemory;
@@ -255,6 +256,7 @@ public class Selector implements Selectable, AutoCloseable {
             boolean connected = doConnect(socketChannel, address);
             key = registerChannel(id, socketChannel, SelectionKey.OP_CONNECT);
 
+            // 如果立刻连接上，说明其实是连接的本机，本机是可以立刻连接成功的，如果是远程服务端的话，连接的建立是异步，相对缓慢，是在selector select到connect事件后连接才算建立完成
             if (connected) {
                 // OP_CONNECT won't trigger for immediately connected channels
                 log.debug("Immediately connected to node {}", id);
@@ -274,6 +276,9 @@ public class Selector implements Selectable, AutoCloseable {
     // in order to simulate "immediately connected" sockets.
     protected boolean doConnect(SocketChannel channel, InetSocketAddress address) throws IOException {
         try {
+            // 看源码注释呢，说非阻塞模式下，如果是连接远端服务器，会立刻返回false，此时呢，tcp会在后台去进行三次握手，需要等到selector轮询到OP_CONNECT事件，这时候，才是连接才建立了，这是需要调用 finishConnect()
+            //  finishConnect() 这个方法，我猜测，应该是tcp连接已经建好了，调这个方法，就是初始化本地应用层的资源而已
+            //  如果是连接本机localhost，那么该方法会立刻返回true
             return channel.connect(address);
         } catch (UnresolvedAddressException e) {
             throw new IOException("Can't resolve address: " + address, e);
@@ -282,13 +287,21 @@ public class Selector implements Selectable, AutoCloseable {
 
     private void configureSocketChannel(SocketChannel socketChannel, int sendBufferSize, int receiveBufferSize)
             throws IOException {
+        // 设置非阻塞模式
         socketChannel.configureBlocking(false);
         Socket socket = socketChannel.socket();
+        // 设置底层keepalive
+        // 点进去看源码注释，设置为true的话，就是使用tcp传输层的连接保障，如果2h都没有数据交互，那么就发送一个探测包过去，以便维持长连接，
+        // 当然也有在应用层自己实现心跳机制的，kafka这里直接使用了传输层的tcp心跳机制
         socket.setKeepAlive(true);
+        // 设置发送缓冲区
         if (sendBufferSize != Selectable.USE_DEFAULT_BUFFER_SIZE)
             socket.setSendBufferSize(sendBufferSize);
+        // 设置接受缓冲区
         if (receiveBufferSize != Selectable.USE_DEFAULT_BUFFER_SIZE)
             socket.setReceiveBufferSize(receiveBufferSize);
+        // 设置为true呢，就会禁用nagle算法，tcp就会尽快将小的数据包发送出去，降低延迟
+        // 设置为false的，就会开启nagle算法，tcp就会尽可能的收集小的数据包，然后依次发送出去，吞吐量增大，但是延迟也会提高
         socket.setTcpNoDelay(true);
     }
 
@@ -325,6 +338,7 @@ public class Selector implements Selectable, AutoCloseable {
     }
 
     protected SelectionKey registerChannel(String id, SocketChannel socketChannel, int interestedOps) throws IOException {
+        // 注册socketChannel到nioSelector上，并关注感兴趣的连接事件
         SelectionKey key = socketChannel.register(nioSelector, interestedOps);
         KafkaChannel channel = buildAndAttachKafkaChannel(socketChannel, id, key);
         this.channels.put(id, channel);
@@ -335,8 +349,10 @@ public class Selector implements Selectable, AutoCloseable {
 
     private KafkaChannel buildAndAttachKafkaChannel(SocketChannel socketChannel, String id, SelectionKey key) throws IOException {
         try {
+            // 封装不同的SelectionKey为channel，包含不同的认证机制
             KafkaChannel channel = channelBuilder.buildChannel(id, key, maxReceiveSize, memoryPool,
                 new SelectorChannelMetadataRegistry());
+            // 将封装的KafkaChannel作为SelectionKey的attach
             key.attach(channel);
             return channel;
         } catch (Exception e) {

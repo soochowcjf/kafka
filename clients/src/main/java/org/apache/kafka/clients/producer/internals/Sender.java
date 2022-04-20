@@ -84,6 +84,9 @@ public class Sender implements Runnable {
     /* the flag indicating whether the producer should guarantee the message order on the broker or not. */
     private final boolean guaranteeMessageOrder;
 
+    /**
+     * 默认1M
+     */
     /* the maximum request size to attempt to send to the server */
     private final int maxRequestSize;
 
@@ -167,7 +170,9 @@ public class Sender implements Runnable {
     }
 
     private void maybeRemoveAndDeallocateBatch(ProducerBatch batch) {
+        // 从inflight中移除该batch
         maybeRemoveFromInflightBatches(batch);
+
         this.accumulator.deallocate(batch);
     }
 
@@ -184,6 +189,7 @@ public class Sender implements Runnable {
                 Iterator<ProducerBatch> iter = partitionInFlightBatches.iterator();
                 while (iter.hasNext()) {
                     ProducerBatch batch = iter.next();
+                    // 超过了deliveryTimeout
                     if (batch.hasReachedDeliveryTimeout(accumulator.getDeliveryTimeoutMs(), now)) {
                         iter.remove();
                         // expireBatches is called in Sender.sendProducerData, before client.poll.
@@ -332,6 +338,7 @@ public class Sender implements Runnable {
         // get the list of partitions with data ready to send
         RecordAccumulator.ReadyCheckResult result = this.accumulator.ready(cluster, now);
 
+        // 如果存在某些topic的partition的leader还不知道的话，那么就需要去拉一下元数据
         // if there are any partitions whose leaders are not known yet, force metadata update
         if (!result.unknownLeaderTopics.isEmpty()) {
             // The set of topics with unknown leader contains topics with leader election pending as well as
@@ -342,6 +349,7 @@ public class Sender implements Runnable {
 
             log.debug("Requesting metadata update due to unknown leader topics from the batched records: {}",
                 result.unknownLeaderTopics);
+            // 设置可以拉取元数据标识
             this.metadata.requestUpdate();
         }
 
@@ -350,16 +358,21 @@ public class Sender implements Runnable {
         long notReadyTimeout = Long.MAX_VALUE;
         while (iter.hasNext()) {
             Node node = iter.next();
+            // 判断与该broker的连接是否能够发送数据，如果不能的话，就移除该node
             if (!this.client.ready(node, now)) {
                 iter.remove();
                 notReadyTimeout = Math.min(notReadyTimeout, this.client.pollDelayMs(node, now));
             }
         }
 
+        // 每个node id对应的需要发送的batch集合
         // create produce requests
         Map<Integer, List<ProducerBatch>> batches = this.accumulator.drain(cluster, result.readyNodes, this.maxRequestSize, now);
+        // 加入飞行中的batch队列
         addToInflightBatches(batches);
         if (guaranteeMessageOrder) {
+            // 如果需要保证消息的有序性的话，那么就需要让聚集器暂时不要接受这些topic对应的数据了
+            // 否则如果消息发送失败，进行重试的话，会导致消息乱序的
             // Mute all the partitions drained
             for (List<ProducerBatch> batchList : batches.values()) {
                 for (ProducerBatch batch : batchList)
@@ -368,7 +381,9 @@ public class Sender implements Runnable {
         }
 
         accumulator.resetNextBatchExpiryTime();
+        // 获取inflight中过期的batch集合
         List<ProducerBatch> expiredInflightBatches = getExpiredInflightBatches(now);
+        // 获取聚集器中过期的batch集合
         List<ProducerBatch> expiredBatches = this.accumulator.expiredBatches(now);
         expiredBatches.addAll(expiredInflightBatches);
 
@@ -380,6 +395,7 @@ public class Sender implements Runnable {
         for (ProducerBatch expiredBatch : expiredBatches) {
             String errorMessage = "Expiring " + expiredBatch.recordCount + " record(s) for " + expiredBatch.topicPartition
                 + ":" + (now - expiredBatch.createdMs) + " ms has passed since batch creation";
+            // 回调超时异常
             failBatch(expiredBatch, -1, NO_TIMESTAMP, new TimeoutException(errorMessage), false);
             if (transactionManager != null && expiredBatch.inRetry()) {
                 // This ensures that no new batches are drained until the current in flight batches are fully resolved.
@@ -738,6 +754,7 @@ public class Sender implements Runnable {
         if (batches.isEmpty())
             return;
 
+        // 保存的每个topicPartition 对应的待发送的 ProducerBatch，用户接受response进行关联
         final Map<TopicPartition, ProducerBatch> recordsByPartition = new HashMap<>(batches.size());
 
         // find the minimum magic version used when creating the record sets
@@ -782,8 +799,10 @@ public class Sender implements Runnable {
                         .setTimeoutMs(timeout)
                         .setTransactionalId(transactionalId)
                         .setTopicData(tpd));
+        // 用户请求响应回调
         RequestCompletionHandler callback = response -> handleProduceResponse(response, recordsByPartition, time.milliseconds());
 
+        // brokerId
         String nodeId = Integer.toString(destination);
         ClientRequest clientRequest = client.newClientRequest(nodeId, requestBuilder, now, acks != 0,
                 requestTimeoutMs, callback);

@@ -184,8 +184,10 @@ class GroupCoordinator(val brokerId: Int,
               group.remove(memberId)
               responseCallback(JoinGroupResult(JoinGroupRequest.UNKNOWN_MEMBER_ID, Errors.GROUP_MAX_SIZE_REACHED))
             } else if (isUnknownMember) {
+              // 没有memberid的
               doUnknownJoinGroup(group, groupInstanceId, requireKnownMemberId, clientId, clientHost, rebalanceTimeoutMs, sessionTimeoutMs, protocolType, protocols, responseCallback)
             } else {
+              // 知道memberid的
               doJoinGroup(group, memberId, groupInstanceId, clientId, clientHost, rebalanceTimeoutMs, sessionTimeoutMs, protocolType, protocols, responseCallback)
             }
 
@@ -430,6 +432,7 @@ class GroupCoordinator(val brokerId: Int,
                       maybePrepareRebalance(group, s"error when storing group assignment during SyncGroup (member: $memberId)")
                     } else {
                       setAndPropagateAssignment(group, assignment)
+                      // 将group状态变更为Stable
                       group.transitionTo(Stable)
                     }
                   }
@@ -948,6 +951,7 @@ class GroupCoordinator(val brokerId: Int,
         warn(s"Sending empty assignment to member ${member.memberId} of ${group.groupId} for generation ${group.generationId} with no errors")
       }
 
+      // 写assignment给所有的消费者
       if (group.maybeInvokeSyncCallback(member, SyncGroupResult(protocolType, protocolName, member.assignment, error))) {
         // reset the session timeout for members after propagating the member's assignment.
         // This is because if any member's session expired while we were still awaiting either
@@ -1133,6 +1137,7 @@ class GroupCoordinator(val brokerId: Int,
     // if a sync expiration is pending, cancel it.
     removeSyncExpiration(group)
 
+    // 如果消费组内为空，说明是第一个消费者入组，就等待一段时间initialRebalanceDelayMs
     val delayedRebalance = if (group.is(Empty))
       new InitialDelayedJoin(this,
         rebalancePurgatory,
@@ -1140,15 +1145,19 @@ class GroupCoordinator(val brokerId: Int,
         groupConfig.groupInitialRebalanceDelayMs,
         groupConfig.groupInitialRebalanceDelayMs,
         max(group.rebalanceTimeoutMs - groupConfig.groupInitialRebalanceDelayMs, 0))
-    else
+    else {
+      // 不为空,等待rebalanceTimeOut
       new DelayedJoin(this, group, group.rebalanceTimeoutMs)
+    }
 
+    // 这个消费组的状态变更为PreparingRebalance
     group.transitionTo(PreparingRebalance)
 
     info(s"Preparing to rebalance group ${group.groupId} in state ${group.currentState} with old generation " +
       s"${group.generationId} (${Topic.GROUP_METADATA_TOPIC_NAME}-${partitionFor(group.groupId)}) (reason: $reason)")
 
     val groupKey = GroupJoinKey(group.groupId)
+    // 挂起joinGroup的时间轮
     rebalancePurgatory.tryCompleteElseWatch(delayedRebalance, Seq(groupKey))
   }
 
@@ -1206,6 +1215,7 @@ class GroupCoordinator(val brokerId: Int,
           new DelayedJoin(this, group, group.rebalanceTimeoutMs),
           Seq(GroupJoinKey(group.groupId)))
       } else {
+        // 这里呢，在返回joinGroup响应请求之前，会将group的状态由PreparingRebalance =》 CompletingRebalance
         group.initNextGeneration()
         if (group.is(Empty)) {
           info(s"Group ${group.groupId} with generation ${group.generationId} is now empty " +
@@ -1238,13 +1248,16 @@ class GroupCoordinator(val brokerId: Int,
               leaderId = group.leaderOrNull,
               error = Errors.NONE)
 
+            // 发送joinGroup的响应给消费者
             group.maybeInvokeJoinCallback(member, joinResult)
+            // 开始挂心跳时间轮，10s
             completeAndScheduleNextHeartbeatExpiration(group, member)
             member.isNew = false
 
             group.addPendingSyncMember(member.memberId)
           }
 
+          // 开始挂syncGroup请求时间轮60s
           schedulePendingSync(group)
         }
       }

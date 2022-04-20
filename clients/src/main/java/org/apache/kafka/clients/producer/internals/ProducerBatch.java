@@ -200,6 +200,7 @@ public final class ProducerBatch {
 
         if (this.finalState.get() != FinalState.SUCCEEDED) {
             if (tryFinalState == FinalState.SUCCEEDED) {
+                // 有可能之前是超时状态，后来服务端返回了成功状态
                 // Log if a previously unsuccessful batch succeeded later on.
                 log.debug("ProduceResponse returned {} for {} after batch with base offset {} had already been {}.",
                     tryFinalState, topicPartition, baseOffset, this.finalState.get());

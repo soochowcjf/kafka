@@ -35,6 +35,7 @@ object Election {
     leaderAndIsrOpt match {
       case Some(leaderAndIsr) =>
         val isr = leaderAndIsr.isr
+        // 从存活的isr中，往后找一个副本作为leader
         val leaderOpt = PartitionLeaderElectionAlgorithms.offlinePartitionLeaderElection(
           assignment, isr, liveReplicas.toSet, uncleanLeaderElectionEnabled, controllerContext)
         val newLeaderAndIsrOpt = leaderOpt.map { leader =>

@@ -146,6 +146,7 @@ final class ClusterConnectionStates {
         NodeConnectionState connectionState = nodeState.get(id);
         if (connectionState != null && connectionState.host().equals(host)) {
             connectionState.lastConnectAttemptMs = now;
+            // 设置连接的状态为连接中
             connectionState.state = ConnectionState.CONNECTING;
             // Move to next resolved address, or if addresses are exhausted, mark node to be re-resolved
             connectionState.moveToNextAddress();
@@ -223,6 +224,9 @@ final class ClusterConnectionStates {
     }
 
     /**
+     * 1、如果连接已经建立了，但是被限流了，那么返回限流的剩余时间
+     * 2、否则返回连接的重试间隔剩余的时间，因为连接的断开重连是有backoff的，有一个重试间隔
+     *
      * Return the number of milliseconds to wait, based on the connection state and the throttle time, before
      * attempting to send data. If the connection has been established but being throttled, return throttle delay.
      * Otherwise, return connection delay.

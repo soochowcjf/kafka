@@ -68,10 +68,12 @@ public class BufferPool {
      * @param metricGrpName logical group name for metrics
      */
     public BufferPool(long memory, int poolableSize, Metrics metrics, Time time, String metricGrpName) {
+        // 16k
         this.poolableSize = poolableSize;
         this.lock = new ReentrantLock();
         this.free = new ArrayDeque<>();
         this.waiters = new ArrayDeque<>();
+        // 32m
         this.totalMemory = memory;
         this.nonPooledAvailableMemory = memory;
         this.metrics = metrics;

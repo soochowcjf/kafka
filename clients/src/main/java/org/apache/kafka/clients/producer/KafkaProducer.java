@@ -344,9 +344,14 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             log.trace("Starting the Kafka producer");
 
             Map<String, String> metricTags = Collections.singletonMap("client-id", clientId);
-            MetricConfig metricConfig = new MetricConfig().samples(config.getInt(ProducerConfig.METRICS_NUM_SAMPLES_CONFIG))
+            MetricConfig metricConfig = new MetricConfig()
+                    // 默认2个样本
+                    .samples(config.getInt(ProducerConfig.METRICS_NUM_SAMPLES_CONFIG))
+                    // 默认30s
                     .timeWindow(config.getLong(ProducerConfig.METRICS_SAMPLE_WINDOW_MS_CONFIG), TimeUnit.MILLISECONDS)
+                    // 默认INFO
                     .recordLevel(Sensor.RecordingLevel.forName(config.getString(ProducerConfig.METRICS_RECORDING_LEVEL_CONFIG)))
+                    // 默认tags
                     .tags(metricTags);
             List<MetricsReporter> reporters = config.getConfiguredInstances(ProducerConfig.METRIC_REPORTER_CLASSES_CONFIG,
                     MetricsReporter.class,
@@ -361,6 +366,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     ProducerConfig.PARTITIONER_CLASS_CONFIG,
                     Partitioner.class,
                     Collections.singletonMap(ProducerConfig.CLIENT_ID_CONFIG, clientId));
+            // 默认是100ms
             long retryBackoffMs = config.getLong(ProducerConfig.RETRY_BACKOFF_MS_CONFIG);
             if (keySerializer == null) {
                 this.keySerializer = config.getConfiguredInstance(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG,
@@ -389,18 +395,25 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 this.interceptors = new ProducerInterceptors<>(interceptorList);
             ClusterResourceListeners clusterResourceListeners = configureClusterResourceListeners(keySerializer,
                     valueSerializer, interceptorList, reporters);
+            // 默认1m
             this.maxRequestSize = config.getInt(ProducerConfig.MAX_REQUEST_SIZE_CONFIG);
+            // 默认32m
             this.totalMemorySize = config.getLong(ProducerConfig.BUFFER_MEMORY_CONFIG);
+            // 默认是none
             this.compressionType = CompressionType.forName(config.getString(ProducerConfig.COMPRESSION_TYPE_CONFIG));
 
+            // 1min
             this.maxBlockTimeMs = config.getLong(ProducerConfig.MAX_BLOCK_MS_CONFIG);
+            // 默认是120s
             int deliveryTimeoutMs = configureDeliveryTimeout(config, log);
 
             this.apiVersions = new ApiVersions();
             this.transactionManager = configureTransactionState(config, logContext);
             this.accumulator = new RecordAccumulator(logContext,
+                    // 默认是16k
                     config.getInt(ProducerConfig.BATCH_SIZE_CONFIG),
                     this.compressionType,
+                    // 默认是0ms
                     lingerMs(config),
                     retryBackoffMs,
                     deliveryTimeoutMs,
@@ -418,7 +431,9 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 this.metadata = metadata;
             } else {
                 this.metadata = new ProducerMetadata(retryBackoffMs,
+                        // 默认5min
                         config.getLong(ProducerConfig.METADATA_MAX_AGE_CONFIG),
+                        // 默认5min
                         config.getLong(ProducerConfig.METADATA_MAX_IDLE_CONFIG),
                         logContext,
                         clusterResourceListeners,
@@ -428,6 +443,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             this.errors = this.metrics.sensor("errors");
             this.sender = newSender(logContext, kafkaClient, this.metadata);
             String ioThreadName = NETWORK_THREAD_PREFIX + " | " + clientId;
+            // 创建sender线程，负责消息的发送
             this.ioThread = new KafkaThread(ioThreadName, this.sender, true);
             this.ioThread.start();
             config.logUnused();
@@ -443,23 +459,32 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
 
     // visible for testing
     Sender newSender(LogContext logContext, KafkaClient kafkaClient, ProducerMetadata metadata) {
+        // 默认5
         int maxInflightRequests = configureInflightRequests(producerConfig);
+        // 默认30s
         int requestTimeoutMs = producerConfig.getInt(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG);
         ChannelBuilder channelBuilder = ClientUtils.createChannelBuilder(producerConfig, time, logContext);
         ProducerMetrics metricsRegistry = new ProducerMetrics(this.metrics);
         Sensor throttleTimeSensor = Sender.throttleTimeSensor(metricsRegistry.senderMetrics);
         KafkaClient client = kafkaClient != null ? kafkaClient : new NetworkClient(
+                // 默认9min
                 new Selector(producerConfig.getLong(ProducerConfig.CONNECTIONS_MAX_IDLE_MS_CONFIG),
                         this.metrics, time, "producer", channelBuilder, logContext),
                 metadata,
                 clientId,
                 maxInflightRequests,
+                // 默认50ms
                 producerConfig.getLong(ProducerConfig.RECONNECT_BACKOFF_MS_CONFIG),
+                // 默认1s
                 producerConfig.getLong(ProducerConfig.RECONNECT_BACKOFF_MAX_MS_CONFIG),
+                // 默认128k
                 producerConfig.getInt(ProducerConfig.SEND_BUFFER_CONFIG),
+                // 默认32k
                 producerConfig.getInt(ProducerConfig.RECEIVE_BUFFER_CONFIG),
                 requestTimeoutMs,
+                // 默认10s
                 producerConfig.getLong(ProducerConfig.SOCKET_CONNECTION_SETUP_TIMEOUT_MS_CONFIG),
+                // 默认30s
                 producerConfig.getLong(ProducerConfig.SOCKET_CONNECTION_SETUP_TIMEOUT_MAX_MS_CONFIG),
                 ClientDnsLookup.forConfig(producerConfig.getString(ProducerConfig.CLIENT_DNS_LOOKUP_CONFIG)),
                 time,
@@ -473,12 +498,15 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 metadata,
                 this.accumulator,
                 maxInflightRequests == 1,
+                // 1m
                 producerConfig.getInt(ProducerConfig.MAX_REQUEST_SIZE_CONFIG),
                 acks,
+                // 默认无穷大
                 producerConfig.getInt(ProducerConfig.RETRIES_CONFIG),
                 metricsRegistry.senderMetrics,
                 time,
                 requestTimeoutMs,
+                // 默认100ms
                 producerConfig.getLong(ProducerConfig.RETRY_BACKOFF_MS_CONFIG),
                 this.transactionManager,
                 apiVersions);
@@ -489,12 +517,17 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
     }
 
     private static int configureDeliveryTimeout(ProducerConfig config, Logger log) {
+        // 默认120s
         int deliveryTimeoutMs = config.getInt(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG);
+        // 默认是0ms
         int lingerMs = lingerMs(config);
+        // 默认30s
         int requestTimeoutMs = config.getInt(ProducerConfig.REQUEST_TIMEOUT_MS_CONFIG);
+        // lingerMs+requestTimeoutMs 两者之和
         int lingerAndRequestTimeoutMs = (int) Math.min((long) lingerMs + requestTimeoutMs, Integer.MAX_VALUE);
 
         if (deliveryTimeoutMs < lingerAndRequestTimeoutMs) {
+            // 如果配置的小于两者之和的话，就报错
             if (config.originals().containsKey(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG)) {
                 // throw an exception if the user explicitly set an inconsistent value
                 throw new ConfigException(ProducerConfig.DELIVERY_TIMEOUT_MS_CONFIG
@@ -548,6 +581,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             throw new ConfigException("Must set " + ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION + " to at most 5" +
                     " to use the idempotent producer.");
         }
+        // 默认是5
         return config.getInt(ProducerConfig.MAX_IN_FLIGHT_REQUESTS_PER_CONNECTION);
     }
 
@@ -903,6 +937,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             long nowMs = time.milliseconds();
             ClusterAndWaitTime clusterAndWaitTime;
             try {
+                // 等待元数据拉取成功
                 clusterAndWaitTime = waitOnMetadata(record.topic(), record.partition(), nowMs, maxBlockTimeMs);
             } catch (KafkaException e) {
                 if (metadata.isClosed())
@@ -928,6 +963,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                         " to class " + producerConfig.getClass(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG).getName() +
                         " specified in value.serializer", cce);
             }
+            // 使用分区器进行分区选择
             int partition = partition(record, serializedKey, serializedValue, cluster);
             tp = new TopicPartition(record.topic(), partition);
 
@@ -947,6 +983,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             if (transactionManager != null && transactionManager.isTransactional()) {
                 transactionManager.failIfNotReadyForSend();
             }
+            // 往缓冲区写
             RecordAccumulator.RecordAppendResult result = accumulator.append(tp, timestamp, serializedKey,
                     serializedValue, headers, interceptCallback, remainingWaitMs, true, nowMs);
 
@@ -1044,6 +1081,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             int version = metadata.requestUpdateForTopic(topic);
             sender.wakeup();
             try {
+                // 这边会一直等待到元数据拉取回来
                 metadata.awaitUpdate(version, remainingWaitMs);
             } catch (TimeoutException ex) {
                 // Rethrow with original maxWaitMs to prevent logging exception with remainingWaitMs
@@ -1072,10 +1110,12 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
      * Validate that the record size isn't too large
      */
     private void ensureValidRecordSize(int size) {
+        // 单条消息是否查过默认1M大小
         if (size > maxRequestSize)
             throw new RecordTooLargeException("The message is " + size +
                     " bytes when serialized which is larger than " + maxRequestSize + ", which is the value of the " +
                     ProducerConfig.MAX_REQUEST_SIZE_CONFIG + " configuration.");
+        // 单条消息是否超过缓冲区最大大小32M
         if (size > totalMemorySize)
             throw new RecordTooLargeException("The message is " + size +
                     " bytes when serialized which is larger than the total memory buffer you have configured with the " +

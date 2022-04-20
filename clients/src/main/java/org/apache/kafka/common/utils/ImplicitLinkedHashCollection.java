@@ -88,6 +88,7 @@ public class ImplicitLinkedHashCollection<E extends ImplicitLinkedHashCollection
     private static class HeadElement implements Element {
         static final HeadElement EMPTY = new HeadElement();
 
+        // -1
         private int prev = HEAD_INDEX;
         private int next = HEAD_INDEX;
 
@@ -324,13 +325,16 @@ public class ImplicitLinkedHashCollection<E extends ImplicitLinkedHashCollection
         }
         int slot = slot(elements, key);
         for (int seen = 0; seen < elements.length; seen++) {
+            // 找到hashcode一样的槽位
             Element element = elements[slot];
             if (element == null) {
                 return INVALID_INDEX;
             }
+            // 再判断是否equals
             if (element.elementKeysAreEqual(key)) {
                 return slot;
             }
+            // 如果hash碰撞的话，就往下一个slot去寻找
             slot = (slot + 1) % elements.length;
         }
         return INVALID_INDEX;
@@ -396,6 +400,7 @@ public class ImplicitLinkedHashCollection<E extends ImplicitLinkedHashCollection
             return false;
         }
         if ((size + 1) >= elements.length / 2) {
+            // 扩容
             changeCapacity(calculateCapacity(elements.length));
         }
         int slot = addInternal(newElement, elements);
@@ -422,16 +427,20 @@ public class ImplicitLinkedHashCollection<E extends ImplicitLinkedHashCollection
      *                      if the element could not be inserted.
      */
     int addInternal(Element newElement, Element[] addElements) {
+        // 找到槽位
         int slot = slot(addElements, newElement);
         for (int seen = 0; seen < addElements.length; seen++) {
             Element element = addElements[slot];
             if (element == null) {
+                // 如果该槽位上空的话，直接把元素放在这个槽位上
                 addElements[slot] = newElement;
                 return slot;
             }
+            // 如果槽位上有值了，并且两个元素equals也相等，即同一个元素
             if (element.elementKeysAreEqual(newElement)) {
                 return INVALID_INDEX;
             }
+            // 如果之前的槽位上有值了，就往下一个槽位上找
             slot = (slot + 1) % addElements.length;
         }
         throw new RuntimeException("Not enough hash table slots to add a new element.");

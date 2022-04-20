@@ -100,7 +100,9 @@ public final class ClientUtils {
      * @return configured ChannelBuilder based on the configs.
      */
     public static ChannelBuilder createChannelBuilder(AbstractConfig config, Time time, LogContext logContext) {
+        // 查看客户端参数security.protocol，是什么安全协议
         SecurityProtocol securityProtocol = SecurityProtocol.forName(config.getString(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
+        // 查看客户端sasl机制sasl.mechanism
         String clientSaslMechanism = config.getString(SaslConfigs.SASL_MECHANISM);
         return ChannelBuilders.clientChannelBuilder(securityProtocol, JaasContext.Type.CLIENT, config, null,
                 clientSaslMechanism, time, true, logContext);

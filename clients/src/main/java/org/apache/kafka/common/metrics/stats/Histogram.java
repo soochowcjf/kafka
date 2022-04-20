@@ -162,6 +162,7 @@ public class Histogram {
     }
 
     /**
+     *  在最近序数间线性插值的方法（The Linear Interpolation Between Closest Ranks method）
      * A scheme for calculating the bins where the width of each bin is one more than the previous bin, and therefore
      * the bin widths are increasing at a linear rate. However, the bin widths are scaled such that the specified range
      * of values will all fit within the bins (e.g., the upper range of the last bin is equal to the maximum value).

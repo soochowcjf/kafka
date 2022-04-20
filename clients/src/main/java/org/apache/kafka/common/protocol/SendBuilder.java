@@ -51,7 +51,9 @@ public class SendBuilder implements Writable {
     private long sizeOfBuffers = 0;
 
     SendBuilder(int size) {
+        // 新建一个byteBuffer
         this.buffer = ByteBuffer.allocate(size);
+        // 标识起始位置
         this.buffer.mark();
     }
 
@@ -148,6 +150,7 @@ public class SendBuilder implements Writable {
     }
 
     private void flushPendingSend() {
+        // 举个例子，如果是发送ProduceRequestData，那么这个buffers的第一段是写入的前面的消息头那些，第二段就是实际的消息体，第三段是消息体后面的字段
         flushPendingBuffer();
         if (!buffers.isEmpty()) {
             ByteBuffer[] byteBufferArray = buffers.toArray(new ByteBuffer[0]);
@@ -157,15 +160,22 @@ public class SendBuilder implements Writable {
     }
 
     private void flushPendingBuffer() {
+        // 当前已经写入了消息头信息，先记录当前写到的position
         int latestPosition = buffer.position();
+        // 恢复到起始位置
         buffer.reset();
 
+        // 如果当前位置 > 起始位置，说明已经写入了消息
         if (latestPosition > buffer.position()) {
+            // 截出来这一块buffer
             buffer.limit(latestPosition);
             addBuffer(buffer.slice());
 
+            // 这是用于写后面的字段的
             buffer.position(latestPosition);
+            // 限制后面写入的limit
             buffer.limit(buffer.capacity());
+            // 标识当前的position
             buffer.mark();
         }
     }
@@ -217,9 +227,13 @@ public class SendBuilder implements Writable {
         header.addSize(messageSize, serializationCache, headerVersion);
         apiMessage.addSize(messageSize, serializationCache, apiVersion);
 
+        // 消息体总长度 - 数据长度（这部分零拷贝）+ 头部4个字节
         SendBuilder builder = new SendBuilder(messageSize.sizeExcludingZeroCopy() + 4);
+        // 写入4字节的总长度域
         builder.writeInt(messageSize.totalSize());
+        // 写入header
         header.write(builder, serializationCache, headerVersion);
+        // 写入message
         apiMessage.write(builder, serializationCache, apiVersion);
 
         return builder.build();

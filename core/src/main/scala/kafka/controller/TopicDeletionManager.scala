@@ -33,8 +33,11 @@ trait DeletionClient {
 
 class ControllerDeletionClient(controller: KafkaController, zkClient: KafkaZkClient) extends DeletionClient {
   override def deleteTopic(topic: String, epochZkVersion: Int): Unit = {
+    // 删除topic的副本分配方案
     zkClient.deleteTopicZNode(topic, epochZkVersion)
+    // 删除topic的配置信息
     zkClient.deleteTopicConfigs(Seq(topic), epochZkVersion)
+    // 删除"/admin/delete_topics/${topic}"
     zkClient.deleteTopicDeletions(Seq(topic), epochZkVersion)
   }
 
@@ -97,7 +100,9 @@ class TopicDeletionManager(config: KafkaConfig,
       s"initial ineligible deletions: $initialTopicsIneligibleForDeletion")
 
     if (isDeleteTopicEnabled) {
+      // 保存需要删除的topic
       controllerContext.queueTopicDeletion(initialTopicsToBeDeleted)
+      // 不能删除的topic
       controllerContext.topicsIneligibleForDeletion ++= initialTopicsIneligibleForDeletion & controllerContext.topicsToBeDeleted
     } else {
       // if delete topic is disabled clean the topic entries under /admin/delete_topics
@@ -243,6 +248,7 @@ class TopicDeletionManager(config: KafkaConfig,
     val replicasForDeletedTopic = controllerContext.replicasInState(topic, ReplicaDeletionSuccessful)
     // controller will remove this replica from the state machine as well as its partition assignment cache
     replicaStateMachine.handleStateChanges(replicasForDeletedTopic.toSeq, NonExistentReplica)
+    // 删除zk中的相关节点
     client.deleteTopic(topic, controllerContext.epochZkVersion)
     controllerContext.removeTopic(topic)
   }
@@ -258,13 +264,17 @@ class TopicDeletionManager(config: KafkaConfig,
     val unseenTopicsForDeletion = topics.diff(controllerContext.topicsWithDeletionStarted)
     if (unseenTopicsForDeletion.nonEmpty) {
       val unseenPartitionsForDeletion = unseenTopicsForDeletion.flatMap(controllerContext.partitionsForTopic)
+      // 将这些topic的所有分区状态 =》 OfflinePartition
       partitionStateMachine.handleStateChanges(unseenPartitionsForDeletion.toSeq, OfflinePartition)
+      // 将这些topic的所有分区状态 =》 NonExistentPartition
       partitionStateMachine.handleStateChanges(unseenPartitionsForDeletion.toSeq, NonExistentPartition)
+      // 将这些topic加入到topicsWithDeletionStarted集合中
       // adding of unseenTopicsForDeletion to topics with deletion started must be done after the partition
       // state changes to make sure the offlinePartitionCount metric is properly updated
       controllerContext.beginTopicDeletion(unseenTopicsForDeletion)
     }
 
+    // 发送这些topic所对应的partition变更给所有的broker节点，以便这些节点不再接收该topic的数据
     // send update metadata so that brokers stop serving data for topics to be deleted
     client.sendMetadataUpdate(topics.flatMap(controllerContext.partitionsForTopic))
 
@@ -292,7 +302,9 @@ class TopicDeletionManager(config: KafkaConfig,
         controllerContext.isReplicaOnline(r.replica, r.topicPartition)
       }
 
+      // 已经删除成功的副本
       val successfullyDeletedReplicas = controllerContext.replicasInState(topic, ReplicaDeletionSuccessful)
+      // 还需要删除的副本
       val replicasForDeletionRetry = aliveReplicas.diff(successfullyDeletedReplicas)
 
       allDeadReplicas ++= deadReplicas
@@ -324,8 +336,10 @@ class TopicDeletionManager(config: KafkaConfig,
       info(s"Handling deletion for topics ${topicsQueuedForDeletion.mkString(",")}")
 
     topicsQueuedForDeletion.foreach { topic =>
+      // 如果这个topic的所有副本都处于了：ReplicaDeletionSuccessful
       // if all replicas are marked as deleted successfully, then topic deletion is done
       if (controllerContext.areAllReplicasInState(topic, ReplicaDeletionSuccessful)) {
+        // 从controller上下文和zk中删除该topic相关信息
         // clear up all state for this topic from controller cache and zookeeper
         completeDeleteTopic(topic)
         info(s"Deletion of topic $topic successfully completed")
@@ -350,6 +364,7 @@ class TopicDeletionManager(config: KafkaConfig,
       retryDeletionForIneligibleReplicas(topicsEligibleForRetry)
     }
 
+    // 执行topic删除
     // topic deletion will be kicked off
     if (topicsEligibleForDeletion.nonEmpty) {
       onTopicDeletion(topicsEligibleForDeletion)

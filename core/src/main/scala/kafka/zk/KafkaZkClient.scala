@@ -114,6 +114,7 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
       .map(e => (e._1, e._2.getVersion))
       .getOrElse(maybeCreateControllerEpochZNode())
 
+    // 将controller_epoch+1
     // Create /controller and update /controller_epoch atomically
     val newControllerEpoch = curEpoch + 1
     val expectedControllerEpochZkVersion = curEpochZkVersion
@@ -135,6 +136,7 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
         if (epoch == newControllerEpoch)
           return (newControllerEpoch, stat.getVersion)
       }
+      // 说明其他的broker已经是controller了
       throw new ControllerMovedException("Controller moved to another broker. Aborting controller startup procedure")
     }
 
@@ -211,8 +213,11 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
    * @return sequence of CreateResponse whose contexts are the partitions they are associated with.
    */
   def createTopicPartitionStatesRaw(leaderIsrAndControllerEpochs: Map[TopicPartition, LeaderIsrAndControllerEpoch], expectedControllerEpochZkVersion: Int): Seq[CreateResponse] = {
+    // 创建"/brokers/topics/{topic}/partitions"
     createTopicPartitions(leaderIsrAndControllerEpochs.keys.map(_.topic).toSet.toSeq, expectedControllerEpochZkVersion)
+    // 创建 "/brokers/topics/{topic}/partitions/{partition}"
     createTopicPartition(leaderIsrAndControllerEpochs.keys.toSeq, expectedControllerEpochZkVersion)
+    // 创建 "/brokers/topics/{topic}/partitions/{partition}/state"
     val createRequests = leaderIsrAndControllerEpochs.map { case (partition, leaderIsrAndControllerEpoch) =>
       val path = TopicPartitionStateZNode.path(partition)
       val data = TopicPartitionStateZNode.encode(leaderIsrAndControllerEpoch)
@@ -300,6 +305,7 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
     val logConfigs = mutable.Map.empty[String, LogConfig]
     val failed = mutable.Map.empty[String, Exception]
     val configResponses = try {
+      // /config/topics/${topic}
       getTopicConfigs(topics)
     } catch {
       case e: Exception =>
@@ -660,6 +666,8 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
     * @return the full replica assignment for each partition from the given topics.
     */
   def getFullReplicaAssignmentForTopics(topics: Set[String]): Map[TopicPartition, ReplicaAssignment] = {
+    // "brokers/topics/{topic}"
+    // {"version":1,"partitions":{"2":[0,1],"1":[2,0],"0":[1,2]}}
     val getDataRequests = topics.map(topic => GetDataRequest(TopicZNode.path(topic), ctx = Some(topic)))
     val getDataResponses = retryRequestsUntilConnected(getDataRequests.toSeq)
     getDataResponses.flatMap { getDataResponse =>
@@ -1105,6 +1113,7 @@ class KafkaZkClient private[zk] (zooKeeperClient: ZooKeeperClient, isSecure: Boo
    * @return optional integer that is Some if the controller znode exists and can be parsed and None otherwise.
    */
   def getControllerId: Option[Int] = {
+    // "/controller"
     val getDataRequest = GetDataRequest(ControllerZNode.path)
     val getDataResponse = retryRequestUntilConnected(getDataRequest)
     getDataResponse.resultCode match {

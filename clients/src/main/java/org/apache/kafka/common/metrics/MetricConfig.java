@@ -26,10 +26,15 @@ import java.util.concurrent.TimeUnit;
 public class MetricConfig {
 
     private Quota quota;
+    // 样品数
     private int samples;
+    // 事件窗口
     private long eventWindow;
+    // 时间窗口
     private long timeWindowMs;
+    // tags
     private Map<String, String> tags;
+    // 监控级别
     private Sensor.RecordingLevel recordingLevel;
 
     public MetricConfig() {

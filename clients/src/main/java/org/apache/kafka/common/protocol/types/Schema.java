@@ -27,7 +27,9 @@ import java.util.Objects;
 public class Schema extends Type {
     private final static Object[] NO_VALUES = new Object[0];
 
+    // 所有属性
     private final BoundField[] fields;
+    // 属性名 => 属性
     private final Map<String, BoundField> fieldsByName;
     private final boolean tolerateMissingFieldsWithDefaults;
     private final Struct cachedStruct;

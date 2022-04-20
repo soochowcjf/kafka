@@ -570,6 +570,7 @@ public class Metrics implements Closeable {
         this.metrics.put(metricName, metric);
         for (MetricsReporter reporter : reporters) {
             try {
+                // 注册到jmxReporter上，这样jmx才可以暴露这些mbean
                 reporter.metricChange(metric);
             } catch (Exception e) {
                 log.error("Error when registering metric on " + reporter.getClass().getName(), e);

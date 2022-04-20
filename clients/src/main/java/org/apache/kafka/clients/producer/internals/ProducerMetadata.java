@@ -67,6 +67,7 @@ public class ProducerMetadata extends Metadata {
     public synchronized void add(String topic, long nowMs) {
         Objects.requireNonNull(topic, "topic cannot be null");
         if (topics.put(topic, nowMs + metadataIdleMs) == null) {
+            // 如果当前topic不存在，说明需要去拉去元数据
             newTopics.add(topic);
             requestUpdateForNewTopics();
         }

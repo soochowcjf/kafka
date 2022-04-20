@@ -42,6 +42,12 @@ case class ReplicaAssignment private (replicas: Seq[Int],
                                       addingReplicas: Seq[Int],
                                       removingReplicas: Seq[Int]) {
 
+  // replicas：0、1、2
+  // addingReplicas：2
+  // removingReplicas：1
+  // originReplicas：0、1
+  // targetReplicas：0、2
+
   lazy val originReplicas: Seq[Int] = replicas.diff(addingReplicas)
   lazy val targetReplicas: Seq[Int] = replicas.diff(removingReplicas)
 
@@ -271,6 +277,7 @@ class ControllerContext {
   def onlineAndOfflineReplicas: (Set[PartitionAndReplica], Set[PartitionAndReplica]) = {
     val onlineReplicas = mutable.Set.empty[PartitionAndReplica]
     val offlineReplicas = mutable.Set.empty[PartitionAndReplica]
+    // 遍历所有的分区方案，构建副本
     for ((topic, partitionAssignments) <- partitionAssignments;
          (partitionId, assignment) <- partitionAssignments) {
       val partition = new TopicPartition(topic, partitionId)

@@ -59,16 +59,20 @@ object TopicCommand extends Logging {
 
     var exitCode = 0
     try {
-      if (opts.hasCreateOption)
+      if (opts.hasCreateOption) {
+        // 创建topic
         topicService.createTopic(opts)
-      else if (opts.hasAlterOption)
+      } else if (opts.hasAlterOption)
         topicService.alterTopic(opts)
       else if (opts.hasListOption)
         topicService.listTopics(opts)
-      else if (opts.hasDescribeOption)
+      else if (opts.hasDescribeOption) {
+        // 查询topic详情
         topicService.describeTopic(opts)
-      else if (opts.hasDeleteOption)
+      } else if (opts.hasDeleteOption) {
+        // 删除topic
         topicService.deleteTopic(opts)
+      }
     } catch {
       case e: ExecutionException =>
         if (e.getCause != null)
@@ -503,6 +507,7 @@ object TopicCommand extends Logging {
           if (Topic.isInternal(topic)) {
             throw new AdminOperationException(s"Topic $topic is a kafka internal topic and is not allowed to be marked for deletion.")
           } else {
+            // 在zk中创建待删除topic /admin/delete_topics/${topic}
             zkClient.createDeleteTopicPath(topic)
             println(s"Topic $topic is marked for deletion.")
             println("Note: This will have no impact if delete.topic.enable is not set to true.")

@@ -22,6 +22,8 @@ import java.nio.ByteBuffer;
 import java.util.Optional;
 
 /**
+ * 数组类型
+ *
  * Represents a type for an array of a particular type
  */
 public class ArrayOf extends DocumentedType {
@@ -57,6 +59,7 @@ public class ArrayOf extends DocumentedType {
         }
 
         Object[] objs = (Object[]) o;
+        // 先写数组的长度
         int size = objs.length;
         buffer.putInt(size);
 
@@ -66,6 +69,7 @@ public class ArrayOf extends DocumentedType {
 
     @Override
     public Object read(ByteBuffer buffer) {
+        // 先读取数组的长度
         int size = buffer.getInt();
         if (size < 0 && isNullable())
             return null;

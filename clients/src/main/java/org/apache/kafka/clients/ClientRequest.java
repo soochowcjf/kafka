@@ -52,13 +52,19 @@ public final class ClientRequest {
                          boolean expectResponse,
                          int requestTimeoutMs,
                          RequestCompletionHandler callback) {
+        // brokerId
         this.destination = destination;
+        // 构建各种请求的builder，泪如ProduceRequest
         this.requestBuilder = requestBuilder;
+        // 这个请求的id
         this.correlationId = correlationId;
         this.clientId = clientId;
         this.createdTimeMs = createdTimeMs;
+        // 是否需要响应，根据ack来判断的
         this.expectResponse = expectResponse;
+        // 请求的超时时间
         this.requestTimeoutMs = requestTimeoutMs;
+        // 响应回调
         this.callback = callback;
     }
 

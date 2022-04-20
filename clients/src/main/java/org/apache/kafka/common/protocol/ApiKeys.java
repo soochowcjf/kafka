@@ -41,6 +41,7 @@ import static org.apache.kafka.common.protocol.types.Type.RECORDS;
  * Identifiers for all the Kafka APIs
  */
 public enum ApiKeys {
+    //
     PRODUCE(ApiMessageType.PRODUCE),
     FETCH(ApiMessageType.FETCH),
     LIST_OFFSETS(ApiMessageType.LIST_OFFSETS),

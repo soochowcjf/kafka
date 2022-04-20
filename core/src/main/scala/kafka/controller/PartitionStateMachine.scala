@@ -36,6 +36,7 @@ abstract class PartitionStateMachine(controllerContext: ControllerContext) exten
    * Invoked on successful controller election.
    */
   def startup(): Unit = {
+    // 初始化partition的状态到controller上下文
     info("Initializing partition state")
     initializePartitionState()
     info("Triggering online partition state changes")
@@ -65,6 +66,7 @@ abstract class PartitionStateMachine(controllerContext: ControllerContext) exten
   }
 
   private def triggerOnlineStateChangeForPartitions(partitions: collection.Set[TopicPartition]): Unit = {
+    // 尝试将处于NewPartition、OfflinePartition状态的分区，转移到OnlinePartition，除了那些分区的topic属于被删除topic集合的
     // try to move all partitions in NewPartition or OfflinePartition state to OnlinePartition state except partitions
     // that belong to topics to be deleted
     val partitionsToTrigger = partitions.filter { partition =>
@@ -221,9 +223,12 @@ class ZkPartitionStateMachine(config: KafkaConfig,
         }
         Map.empty
       case OnlinePartition =>
+        // 分区状态为NewPartition的分区集合
         val uninitializedPartitions = validPartitions.filter(partition => partitionState(partition) == NewPartition)
+        // 分区状态OfflinePartition、OnlinePartition的分区集合
         val partitionsToElectLeader = validPartitions.filter(partition => partitionState(partition) == OfflinePartition || partitionState(partition) == OnlinePartition)
         if (uninitializedPartitions.nonEmpty) {
+          // 初始化leader和isr信息到zk中
           val successfulInitializations = initializeLeaderAndIsrForPartitions(uninitializedPartitions)
           successfulInitializations.foreach { partition =>
             stateChangeLog.info(s"Changed partition $partition from ${partitionState(partition)} to $targetState with state " +
@@ -269,11 +274,14 @@ class ZkPartitionStateMachine(config: KafkaConfig,
    */
   private def initializeLeaderAndIsrForPartitions(partitions: Seq[TopicPartition]): Seq[TopicPartition] = {
     val successfulInitializations = mutable.Buffer.empty[TopicPartition]
+    // 每个分区对应的副本集合，这里其实是前面从zk中读取保存到controller上下文的
     val replicasPerPartition = partitions.map(partition => partition -> controllerContext.partitionReplicaAssignment(partition))
+    // 在线的副本集合
     val liveReplicasPerPartition = replicasPerPartition.map { case (partition, replicas) =>
         val liveReplicasForPartition = replicas.filter(replica => controllerContext.isReplicaOnline(replica, partition))
         partition -> liveReplicasForPartition
     }
+    // 根据副本集合是否为空进行分组
     val (partitionsWithoutLiveReplicas, partitionsWithLiveReplicas) = liveReplicasPerPartition.partition { case (_, liveReplicas) => liveReplicas.isEmpty }
 
     partitionsWithoutLiveReplicas.foreach { case (partition, replicas) =>
@@ -284,11 +292,13 @@ class ZkPartitionStateMachine(config: KafkaConfig,
       logFailedStateChange(partition, NewPartition, OnlinePartition, new StateChangeFailedException(failMsg))
     }
     val leaderIsrAndControllerEpochs = partitionsWithLiveReplicas.map { case (partition, liveReplicas) =>
+      // 第一个副本就是leader
       val leaderAndIsr = LeaderAndIsr(liveReplicas.head, liveReplicas.toList)
       val leaderIsrAndControllerEpoch = LeaderIsrAndControllerEpoch(leaderAndIsr, controllerContext.epoch)
       partition -> leaderIsrAndControllerEpoch
     }.toMap
     val createResponses = try {
+      // 创建 "/brokers/topics/{topic}/partitions/{partition}/state" 保存leader和isr信息
       zkClient.createTopicPartitionStatesRaw(leaderIsrAndControllerEpochs, controllerContext.epochZkVersion)
     } catch {
       case e: ControllerMovedException =>
@@ -303,7 +313,9 @@ class ZkPartitionStateMachine(config: KafkaConfig,
       val partition = createResponse.ctx.get.asInstanceOf[TopicPartition]
       val leaderIsrAndControllerEpoch = leaderIsrAndControllerEpochs(partition)
       if (code == Code.OK) {
+        // 保存到controller上下文中
         controllerContext.putPartitionLeadershipInfo(partition, leaderIsrAndControllerEpoch)
+        // 发送LeaderAndIsrRequest给isr列表中的broker
         controllerBrokerRequestBatch.addLeaderAndIsrRequestForBrokers(leaderIsrAndControllerEpoch.leaderAndIsr.isr,
           partition, leaderIsrAndControllerEpoch, controllerContext.partitionFullReplicaAssignment(partition), isNew = true)
         successfulInitializations += partition
@@ -364,6 +376,7 @@ class ZkPartitionStateMachine(config: KafkaConfig,
     partitionLeaderElectionStrategy: PartitionLeaderElectionStrategy
   ): (Map[TopicPartition, Either[Exception, LeaderAndIsr]], Seq[TopicPartition]) = {
     val getDataResponses = try {
+      // 从zk读取分区的leader和isr信息
       zkClient.getTopicPartitionStatesRaw(partitions)
     } catch {
       case e: Exception =>
@@ -425,13 +438,16 @@ class ZkPartitionStateMachine(config: KafkaConfig,
     }
     val recipientsPerPartition = partitionsWithLeaders.map(result => result.topicPartition -> result.liveReplicas).toMap
     val adjustedLeaderAndIsrs = partitionsWithLeaders.map(result => result.topicPartition -> result.leaderAndIsr.get).toMap
+    // 更新zk中leader和isr信息
     val UpdateLeaderAndIsrResult(finishedUpdates, updatesToRetry) = zkClient.updateLeaderAndIsr(
       adjustedLeaderAndIsrs, controllerContext.epoch, controllerContext.epochZkVersion)
     finishedUpdates.forKeyValue { (partition, result) =>
       result.foreach { leaderAndIsr =>
         val replicaAssignment = controllerContext.partitionFullReplicaAssignment(partition)
         val leaderIsrAndControllerEpoch = LeaderIsrAndControllerEpoch(leaderAndIsr, controllerContext.epoch)
+        // 更新controller上下文中的leader和isr信息
         controllerContext.putPartitionLeadershipInfo(partition, leaderIsrAndControllerEpoch)
+        // 发送LeaderAndIsrRequest给isr列表中的机器
         controllerBrokerRequestBatch.addLeaderAndIsrRequestForBrokers(recipientsPerPartition(partition), partition,
           leaderIsrAndControllerEpoch, replicaAssignment, isNew = false)
       }
@@ -475,6 +491,7 @@ class ZkPartitionStateMachine(config: KafkaConfig,
         (partition, Option(leaderAndIsr), true)
       }
     } else {
+      // 从zk中"/config/topics/${topic}"读取配置信息
       val (logConfigs, failed) = zkClient.getLogConfigs(
         partitionsWithNoLiveInSyncReplicas.iterator.map { case (partition, _) => partition.topic }.toSet,
         config.originals()

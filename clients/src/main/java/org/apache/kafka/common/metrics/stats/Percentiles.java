@@ -35,10 +35,13 @@ public class Percentiles extends SampledStat implements CompoundStat {
     private final Logger log = LoggerFactory.getLogger(Percentiles.class);
 
     public enum BucketSizing {
-        CONSTANT, LINEAR
+        CONSTANT,
+        //在最近序数间线性插值的方法（The Linear Interpolation Between Closest Ranks method）
+        LINEAR
     }
 
     private final int buckets;
+    // p50、p90、p99
     private final Percentile[] percentiles;
     private final BinScheme binScheme;
     private final double min;

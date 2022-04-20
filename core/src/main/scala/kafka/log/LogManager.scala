@@ -1044,6 +1044,9 @@ class LogManager(logDirs: Seq[File],
   }
 
   /**
+   * 如果kafka配置了多个数据目录的话，那么一个新的副本创建时，是优先从partition数量最少的那个目录创建的
+   * 如：log.dirs=/data/kafka/data,/data1/kafka/data
+   *
    * Provides the full ordered list of suggested directories for the next partition.
    * Currently this is done by calculating the number of partitions in each directory and then sorting the
    * data directories by fewest partitions.
