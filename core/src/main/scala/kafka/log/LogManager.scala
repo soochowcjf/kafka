@@ -327,6 +327,7 @@ class LogManager(logDirs: Seq[File],
 
         var recoveryPoints = Map[TopicPartition, Long]()
         try {
+          // 读取到每个topicPartition的offset
           recoveryPoints = this.recoveryPointCheckpoints(dir).read()
         } catch {
           case e: Exception =>
@@ -343,6 +344,7 @@ class LogManager(logDirs: Seq[File],
               s"$logDirAbsolutePath, resetting to the base offset of the first segment", e)
         }
 
+        // 该目录下所有的topicPartition目录
         val logsToLoad = Option(dir.listFiles).getOrElse(Array.empty).filter(logDir =>
           logDir.isDirectory && Log.parseTopicPartitionName(logDir).topic != KafkaRaftServer.MetadataTopic)
         val numLogsLoaded = new AtomicInteger(0)
@@ -354,6 +356,7 @@ class LogManager(logDirs: Seq[File],
               debug(s"Loading log $logDir")
 
               val logLoadStartMs = time.hiResClockMs()
+              // 加载目录
               val log = loadLog(logDir, hadCleanShutdown, recoveryPoints, logStartOffsets, topicConfigOverrides)
               val logLoadDurationMs = time.hiResClockMs() - logLoadStartMs
               val currentNumLoaded = numLogsLoaded.incrementAndGet()
@@ -408,6 +411,7 @@ class LogManager(logDirs: Seq[File],
     val topicConfigOverrides = mutable.Map[String, LogConfig]()
     val defaultProps = currentDefaultConfig.originals()
     topicNames.foreach { topicName =>
+      // 获取每个topic的配置信息 "/config/topics/${topic}"
       val overrides = configRepository.topicConfig(topicName)
       // save memory by only including configs for topics with overrides
       if (!overrides.isEmpty) {

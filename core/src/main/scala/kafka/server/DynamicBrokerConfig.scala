@@ -210,7 +210,9 @@ class DynamicBrokerConfig(private val kafkaConfig: KafkaConfig) extends Logging 
   private[server] def initialize(zkClient: KafkaZkClient): Unit = {
     currentConfig = new KafkaConfig(kafkaConfig.props, false, None)
     val adminZkClient = new AdminZkClient(zkClient)
+    // 获取默认配置 "/brokers/<default>"
     updateDefaultConfig(adminZkClient.fetchEntityConfig(ConfigType.Broker, ConfigEntityName.Default))
+    // 获取具体broker的配置 "/brokers/${brokerId}"
     val props = adminZkClient.fetchEntityConfig(ConfigType.Broker, kafkaConfig.brokerId.toString)
     val brokerConfig = maybeReEncodePasswords(props, adminZkClient)
     updateBrokerConfig(kafkaConfig.brokerId, brokerConfig)

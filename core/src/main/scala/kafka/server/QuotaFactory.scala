@@ -93,7 +93,9 @@ object QuotaFactory extends Logging {
       warn(s"${KafkaConfig.ProducerQuotaBytesPerSecondDefaultProp} has been deprecated in 0.11.0.0 and will be removed in a future release. Use dynamic quota defaults instead.")
     ClientQuotaManagerConfig(
       quotaDefault = cfg.producerQuotaBytesPerSecondDefault,
+      // 默认10个窗口，10+1个当前的窗口
       numQuotaSamples = cfg.numQuotaSamples,
+      // 默认每个窗口1s
       quotaWindowSizeSeconds = cfg.quotaWindowSizeSeconds
     )
   }

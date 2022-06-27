@@ -34,9 +34,13 @@ public class ExponentialBackoff {
     private final double jitter;
 
     public ExponentialBackoff(long initialInterval, int multiplier, long maxInterval, double jitter) {
+        // 50
         this.initialInterval = initialInterval;
+        // 2
         this.multiplier = multiplier;
+        // 0.2
         this.jitter = jitter;
+        // maxInterval = 1000
         this.expMax = maxInterval > initialInterval ?
                 Math.log(maxInterval / (double) Math.max(initialInterval, 1)) / Math.log(multiplier) : 0;
     }

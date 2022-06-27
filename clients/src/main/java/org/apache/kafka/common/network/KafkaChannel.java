@@ -387,6 +387,7 @@ public class KafkaChannel implements AutoCloseable {
     public NetworkSend maybeCompleteSend() {
         if (send != null && send.completed()) {
             midWrite = false;
+            // 移除该兴趣的写事件
             transportLayer.removeInterestOps(SelectionKey.OP_WRITE);
             NetworkSend result = send;
             send = null;
@@ -414,6 +415,7 @@ public class KafkaChannel implements AutoCloseable {
     }
 
     public NetworkReceive maybeCompleteReceive() {
+        // 如果一个数据包的长度域和数据域都完整了，那么这个数据包就是完整的数据包
         if (receive != null && receive.complete()) {
             receive.payload().rewind();
             NetworkReceive result = receive;

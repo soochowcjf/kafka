@@ -251,16 +251,20 @@ public class SaslClientAuthenticator implements Authenticator {
                 if (apiVersionsResponse == null)
                     break;
                 else {
+                    // 收到 RECEIVE_APIVERSIONS_RESPONSE 响应之后，将状态设置为 SEND_HANDSHAKE_REQUEST
                     setSaslAuthenticateAndHandshakeVersions(apiVersionsResponse);
                     reauthInfo.apiVersionsResponseReceivedFromBroker = apiVersionsResponse;
                     setSaslState(SaslState.SEND_HANDSHAKE_REQUEST);
                     // Fall through to send handshake request with the latest supported version
                 }
             case SEND_HANDSHAKE_REQUEST:
+                // 发送握手包给服务端
                 sendHandshakeRequest(saslHandshakeVersion);
+                // 将状态设置为 RECEIVE_HANDSHAKE_RESPONSE
                 setSaslState(SaslState.RECEIVE_HANDSHAKE_RESPONSE);
                 break;
             case RECEIVE_HANDSHAKE_RESPONSE:
+                // 收到握手响应之后，设置状态为 INITIAL
                 SaslHandshakeResponse handshakeResponse = (SaslHandshakeResponse) receiveKafkaResponse();
                 if (handshakeResponse == null)
                     break;
@@ -270,7 +274,9 @@ public class SaslClientAuthenticator implements Authenticator {
                     // Fall through and start SASL authentication using the configured client mechanism
                 }
             case INITIAL:
+                // 发送token给服务端
                 sendInitialToken();
+                // 设置状态为 INTERMEDIATE
                 setSaslState(SaslState.INTERMEDIATE);
                 break;
             case REAUTH_PROCESS_ORIG_APIVERSIONS_RESPONSE:
@@ -305,6 +311,7 @@ public class SaslClientAuthenticator implements Authenticator {
                 // For versions with SASL_AUTHENTICATE header, server always sends a response to each SASL_AUTHENTICATE request.
                 if (saslClient.isComplete()) {
                     if (saslAuthenticateVersion == DISABLE_KAFKA_SASL_AUTHENTICATE_HEADER || noResponsesPending)
+                        // 设置状态为COMPLETE
                         setSaslState(SaslState.COMPLETE);
                     else
                         setSaslState(SaslState.CLIENT_COMPLETE);

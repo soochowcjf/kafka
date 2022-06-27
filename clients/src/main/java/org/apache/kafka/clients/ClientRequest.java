@@ -54,7 +54,7 @@ public final class ClientRequest {
                          RequestCompletionHandler callback) {
         // brokerId
         this.destination = destination;
-        // 构建各种请求的builder，泪如ProduceRequest
+        // 构建各种请求的builder，例如ProduceRequest
         this.requestBuilder = requestBuilder;
         // 这个请求的id
         this.correlationId = correlationId;

@@ -415,6 +415,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                     this.compressionType,
                     // 默认是0ms
                     lingerMs(config),
+                    // 100ms
                     retryBackoffMs,
                     deliveryTimeoutMs,
                     metrics,
@@ -430,7 +431,9 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             if (metadata != null) {
                 this.metadata = metadata;
             } else {
-                this.metadata = new ProducerMetadata(retryBackoffMs,
+                this.metadata = new ProducerMetadata(
+                        // 100ms
+                        retryBackoffMs,
                         // 默认5min
                         config.getLong(ProducerConfig.METADATA_MAX_AGE_CONFIG),
                         // 默认5min
@@ -501,7 +504,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
                 // 1m
                 producerConfig.getInt(ProducerConfig.MAX_REQUEST_SIZE_CONFIG),
                 acks,
-                // 默认无穷大
+                // 重试次数，默认无穷大
                 producerConfig.getInt(ProducerConfig.RETRIES_CONFIG),
                 metricsRegistry.senderMetrics,
                 time,
@@ -973,6 +976,7 @@ public class KafkaProducer<K, V> implements Producer<K, V> {
             int serializedSize = AbstractRecords.estimateSizeInBytesUpperBound(apiVersions.maxUsableProduceMagic(),
                     compressionType, serializedKey, serializedValue, headers);
             ensureValidRecordSize(serializedSize);
+            // 如果没有设置时间戳，那么就是producer处理时的时间戳
             long timestamp = record.timestamp() == null ? nowMs : record.timestamp();
             if (log.isTraceEnabled()) {
                 log.trace("Attempting to append record {} with callback {} to topic {} partition {}", record, callback, record.topic(), partition);

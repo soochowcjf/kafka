@@ -37,10 +37,7 @@ import org.slf4j.Logger;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.nio.channels.CancelledKeyException;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.SocketChannel;
-import java.nio.channels.UnresolvedAddressException;
+import java.nio.channels.*;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -178,6 +175,7 @@ public class Selector implements Selectable, AutoCloseable {
         this.sensors = new SelectorMetrics(metrics, metricGrpPrefix, metricTags, metricsPerConnection);
         this.channelBuilder = channelBuilder;
         this.recordTimePerConnection = recordTimePerConnection;
+        // 9min
         this.idleExpiryManager = connectionMaxIdleMs < 0 ? null : new IdleExpiryManager(time, connectionMaxIdleMs);
         this.memoryPool = memoryPool;
         this.lowMemThreshold = (long) (0.1 * this.memoryPool.size());
@@ -556,6 +554,7 @@ public class Selector implements Selectable, AutoCloseable {
 
                 /* if channel is not ready finish prepare */
                 if (channel.isConnected() && !channel.ready()) {
+                    // 进行认证
                     channel.prepare();
                     if (channel.ready()) {
                         long readyTimeMs = time.milliseconds();
@@ -666,6 +665,7 @@ public class Selector implements Selectable, AutoCloseable {
             if (bytesSent > 0)
                 this.sensors.recordBytesSent(nodeId, bytesSent, currentTimeMs);
             if (send != null) {
+                // 待需要发送的数据包全部发送完成
                 this.completedSends.add(send);
                 this.sensors.recordCompletedSend(nodeId, send.size(), currentTimeMs);
             }
@@ -695,6 +695,7 @@ public class Selector implements Selectable, AutoCloseable {
 
             NetworkReceive receive = channel.maybeCompleteReceive();
             if (receive != null) {
+                // 如果一个数据包读取完整了，那么就将其加入到待处理队列中去
                 addToCompletedReceives(channel, receive, currentTimeMs);
             }
         }

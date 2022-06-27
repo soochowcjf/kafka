@@ -124,6 +124,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
         this.isTransactional = isTransactional;
         this.isControlBatch = isControlBatch;
         this.partitionLeaderEpoch = partitionLeaderEpoch;
+        // 一般是16k大小限制，也有可能一条大消息大于16k，那么分配的内存块大小就会超过16k
         this.writeLimit = writeLimit;
         this.initialPosition = bufferStream.position();
         this.batchHeaderSizeInBytes = AbstractRecords.recordBatchHeaderSizeInBytes(magic, compressionType);
@@ -703,6 +704,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
 
         if (timestampType == TimestampType.LOG_APPEND_TIME)
             timestamp = logAppendTime;
+        // 写入数据
         long crc = LegacyRecord.write(appendStream, magic, timestamp, key, value, CompressionType.NONE, timestampType);
         // 记录写入的数据
         recordWritten(offset, timestamp, size + Records.LOG_OVERHEAD);
@@ -798,6 +800,7 @@ public class MemoryRecordsBuilder implements AutoCloseable {
             recordSize = DefaultRecord.sizeInBytes(nextOffsetDelta, timestampDelta, key, value, headers);
         }
 
+        // 判断加上这条消息之后，16k内存还没有满
         // Be conservative and not take compression of the new record into consideration.
         return this.writeLimit >= estimatedBytesWritten() + recordSize;
     }

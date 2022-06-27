@@ -210,6 +210,7 @@ class ClientQuotaManager(private val config: ClientQuotaManagerConfig,
   delayQueueSensor.add(metrics.metricName("queue-size", quotaType.toString,
     "Tracks the size of the delay queue"), new CumulativeSum())
 
+  // 延时队列
   private val delayQueue = new DelayQueue[ThrottledChannel]()
   private[server] val throttledChannelReaper = new ThrottledChannelReaper(delayQueue, threadNamePrefix)
   start() // Use start method to keep spotbugs happy
@@ -225,6 +226,7 @@ class ClientQuotaManager(private val config: ClientQuotaManagerConfig,
     s"${prefix}ThrottledChannelReaper-$quotaType", false) {
 
     override def doWork(): Unit = {
+      // 说明限流结束
       val throttledChannel: ThrottledChannel = delayQueue.poll(1, TimeUnit.SECONDS)
       if (throttledChannel != null) {
         // Decrement the size of the delay queue
@@ -395,12 +397,15 @@ class ClientQuotaManager(private val config: ClientQuotaManagerConfig,
       metricTags,
       sensorAccessor.getOrCreate(
         getQuotaSensorName(metricTags),
+        // 1h后移除
         ClientQuotaManager.InactiveSensorExpirationTimeSeconds,
+        // rate
         registerQuotaMetrics(metricTags)
       ),
       sensorAccessor.getOrCreate(
         getThrottleTimeSensorName(metricTags),
         ClientQuotaManager.InactiveSensorExpirationTimeSeconds,
+        // 平均值
         sensor => sensor.add(throttleMetricName(metricTags), new Avg)
       )
     )

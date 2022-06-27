@@ -197,10 +197,12 @@ class KafkaServer(
           _featureChangeListener.initOrThrow(config.zkConnectionTimeoutMs)
         }
 
+        // 在zk的"/cluster/id"下获取集群id，如果不存在就随机生成一个并写入zk
         /* Get or create cluster_id */
         _clusterId = getOrGenerateClusterId(zkClient)
         info(s"Cluster ID = ${clusterId}")
 
+        // 加载集群配置的log.dirs的目录下的meta.properties文件，如果存在多个目录，校验多个目录下的文件元数据是否一致，应该都是一样的
         /* load metadata */
         val (preloadedBrokerMetadataCheckpoint, initialOfflineDirs) =
           BrokerMetadataCheckpoint.getBrokerMetadataAndOfflineDirs(config.logDirs, ignoreMissing = true)
@@ -211,12 +213,14 @@ class KafkaServer(
             "(which is implicit when the `version` field is missing).")
         }
 
+        // 第一次启动的时候是没有meta.properties文件的，所有clusterId是不存在的
         /* check cluster id */
         if (preloadedBrokerMetadataCheckpoint.clusterId.isDefined && preloadedBrokerMetadataCheckpoint.clusterId.get != clusterId)
           throw new InconsistentClusterIdException(
             s"The Cluster ID ${clusterId} doesn't match stored clusterId ${preloadedBrokerMetadataCheckpoint.clusterId} in meta.properties. " +
             s"The broker is trying to join the wrong cluster. Configured zookeeper.connect may be wrong.")
 
+        // 获取brokerId
         /* generate brokerId */
         config.brokerId = getOrGenerateBrokerId(preloadedBrokerMetadataCheckpoint)
         logContext = new LogContext(s"[KafkaServer id=${config.brokerId}] ")
@@ -226,10 +230,12 @@ class KafkaServer(
         // applied after DynamicConfigManager starts.
         config.dynamicConfig.initialize(zkClient)
 
+        // 默认10个线程，后台执行器，这时候并没有启动什么任务
         /* start scheduler */
         kafkaScheduler = new KafkaScheduler(config.backgroundThreads)
         kafkaScheduler.startup()
 
+        // 指标metrics
         /* create and configure metrics */
         kafkaYammerMetrics = KafkaYammerMetrics.INSTANCE
         kafkaYammerMetrics.configure(config.originals)
@@ -238,17 +244,19 @@ class KafkaServer(
         /* register broker metrics */
         _brokerTopicStats = new BrokerTopicStats
 
+        // 配额管理组件
         quotaManagers = QuotaFactory.instantiate(config, metrics, time, threadNamePrefix.getOrElse(""))
         KafkaBroker.notifyClusterListeners(clusterId, kafkaMetricsReporters ++ metrics.reporters.asScala)
 
         logDirFailureChannel = new LogDirFailureChannel(config.logDirs.size)
 
+        // version>2.8 是使用topicId的
         /* start log manager */
         logManager = LogManager(config, initialOfflineDirs,
           new ZkConfigRepository(new AdminZkClient(zkClient)),
           kafkaScheduler, time, brokerTopicStats, logDirFailureChannel, config.usesTopicId)
         brokerState.set(BrokerState.RECOVERY)
-        // 启动logManager
+        // 启动日志管理组件，获取所有topic "/brokers/topics"
         logManager.startup(zkClient.getAllTopicsInCluster())
 
         metadataCache = MetadataCache.zkMetadataCache(config.brokerId)

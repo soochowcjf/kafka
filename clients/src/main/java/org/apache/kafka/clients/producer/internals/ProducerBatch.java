@@ -108,6 +108,7 @@ public final class ProducerBatch {
             this.maxRecordSize = Math.max(this.maxRecordSize, AbstractRecords.estimateSizeInBytesUpperBound(magic(),
                     recordsBuilder.compressionType(), key, value, headers));
             this.lastAppendTime = now;
+            // recordCount代表的是该条数据在这个批次中的序号
             FutureRecordMetadata future = new FutureRecordMetadata(this.produceFuture, this.recordCount,
                                                                    timestamp, checksum,
                                                                    key == null ? -1 : key.length,
@@ -217,15 +218,21 @@ public final class ProducerBatch {
     }
 
     private void completeFutureAndFireCallbacks(long baseOffset, long logAppendTime, RuntimeException exception) {
+        // 设置这个batch的baseOffset，
+        // logAppendTime（如果该topic使用了LogAppendTime，那么是由broker端返回的，如果是CreateTime，那么是用户自己设置的，如果没有设置那么就是producer处理该消息的时间戳），
+        // 以及异常
+
         // Set the future before invoking the callbacks as we rely on its state for the `onCompletion` call
         produceFuture.set(baseOffset, logAppendTime, exception);
 
+        // 进行回调
         // execute callbacks
         for (Thunk thunk : thunks) {
             try {
                 if (exception == null) {
                     RecordMetadata metadata = thunk.future.value();
                     if (thunk.callback != null)
+                        // batch内部的每条消息的offset都是通过该batch的基准offset，然后加上这条消息在该batch包中的相对offset得出
                         thunk.callback.onCompletion(metadata, null);
                 } else {
                     if (thunk.callback != null)
@@ -236,6 +243,7 @@ public final class ProducerBatch {
             }
         }
 
+        // 释放该batch的CountDownLatch
         produceFuture.done();
     }
 

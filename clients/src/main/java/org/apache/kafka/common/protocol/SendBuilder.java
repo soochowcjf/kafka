@@ -138,7 +138,9 @@ public class SendBuilder implements Writable {
     @Override
     public void writeRecords(BaseRecords records) {
         if (records instanceof MemoryRecords) {
+            // 固定字段的buffer
             flushPendingBuffer();
+            // 零拷贝的buffer
             addBuffer(((MemoryRecords) records).buffer());
         } else if (records instanceof UnalignedMemoryRecords) {
             flushPendingBuffer();
@@ -150,7 +152,7 @@ public class SendBuilder implements Writable {
     }
 
     private void flushPendingSend() {
-        // 举个例子，如果是发送ProduceRequestData，那么这个buffers的第一段是写入的前面的消息头那些，第二段就是实际的消息体，第三段是消息体后面的字段
+        // 举个例子，如果是发送ProduceRequestData，由多个buffer组成的，消息头消息体的固定字段buffer+零拷贝的buffer组成的
         flushPendingBuffer();
         if (!buffers.isEmpty()) {
             ByteBuffer[] byteBufferArray = buffers.toArray(new ByteBuffer[0]);
@@ -227,7 +229,7 @@ public class SendBuilder implements Writable {
         header.addSize(messageSize, serializationCache, headerVersion);
         apiMessage.addSize(messageSize, serializationCache, apiVersion);
 
-        // 消息体总长度 - 数据长度（这部分零拷贝）+ 头部4个字节
+        // 消息体总长度 - 数据长度（这部分零拷贝）+ 头部长度域4个字节
         SendBuilder builder = new SendBuilder(messageSize.sizeExcludingZeroCopy() + 4);
         // 写入4字节的总长度域
         builder.writeInt(messageSize.totalSize());

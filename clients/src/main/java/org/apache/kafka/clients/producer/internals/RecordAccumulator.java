@@ -213,6 +213,7 @@ public final class RecordAccumulator {
             }
 
             byte maxUsableMagic = apiVersions.maxUsableProduceMagic();
+            // batchSize=16k，和实际这条消息的大小，两者取大进行内存分配
             int size = Math.max(this.batchSize, AbstractRecords.estimateSizeInBytesUpperBound(maxUsableMagic, compression, key, value, headers));
             log.trace("Allocating a new {} byte message buffer for topic {} partition {} with remaining timeout {}ms", size, tp.topic(), tp.partition(), maxTimeToBlock);
             buffer = free.allocate(size, maxTimeToBlock);
@@ -474,7 +475,8 @@ public final class RecordAccumulator {
                     } else if (!readyNodes.contains(leader) && !isMuted(part)) {
                         // 该batch以及滞留的时间，当前时间戳-上一次尝试发送的时间戳
                         long waitedTimeMs = batch.waitedTimeMs(nowMs);
-                        // true代表需要重试但还没有过重试间隔；false代表不需要重试或者需要重试且已经过了重试间隔
+                        // true代表需要重试但还没有过重试间隔；
+                        // false代表不需要重试或者需要重试且已经过了重试间隔
                         boolean backingOff = batch.attempts() > 0 && waitedTimeMs < retryBackoffMs;
                         // 需要等待的时间，1、如果需要重试且还没有过重试间隔，那么需要等待重试间隔 retryBackoffMs
                         //               2、如果不需要重试或者已经超过了重试间隔，那么需要等待 lingerMs

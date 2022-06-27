@@ -33,6 +33,7 @@ import java.util.Objects;
 import java.util.Set;
 
 public class ProducerMetadata extends Metadata {
+    // 5min
     // If a topic hasn't been accessed for this many milliseconds, it is removed from the cache.
     private final long metadataIdleMs;
 

@@ -26,6 +26,7 @@ import java.nio.ByteBuffer;
 public class ByteBufferSend implements Send {
 
     private final long size;
+    // 需要发送的数据buffer
     protected final ByteBuffer[] buffers;
     private long remaining;
     private boolean pending = false;

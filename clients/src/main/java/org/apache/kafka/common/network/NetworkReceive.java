@@ -36,6 +36,7 @@ public class NetworkReceive implements Receive {
     private static final ByteBuffer EMPTY_BUFFER = ByteBuffer.allocate(0);
 
     private final String source;
+    // 长度域4个字节
     private final ByteBuffer size;
     private final int maxSize;
     private final MemoryPool memoryPool;
@@ -86,6 +87,7 @@ public class NetworkReceive implements Receive {
 
     @Override
     public boolean complete() {
+        // 长度域都读取完了 && 数据域也都读取完了
         return !size.hasRemaining() && buffer != null && !buffer.hasRemaining();
     }
 
@@ -98,6 +100,7 @@ public class NetworkReceive implements Receive {
             read += bytesRead;
             if (!size.hasRemaining()) {
                 size.rewind();
+                // 这个包具体的长度
                 int receiveSize = size.getInt();
                 if (receiveSize < 0)
                     throw new InvalidReceiveException("Invalid receive (size = " + receiveSize + ")");
@@ -110,11 +113,13 @@ public class NetworkReceive implements Receive {
             }
         }
         if (buffer == null && requestedBufferSize != -1) { //we know the size we want but havent been able to allocate it yet
+            // 分配读取数据包的buffer
             buffer = memoryPool.tryAllocate(requestedBufferSize);
             if (buffer == null)
                 log.trace("Broker low on memory - could not allocate buffer of size {} for source {}", requestedBufferSize, source);
         }
         if (buffer != null) {
+            // 读取数据包
             int bytesRead = channel.read(buffer);
             if (bytesRead < 0)
                 throw new EOFException();

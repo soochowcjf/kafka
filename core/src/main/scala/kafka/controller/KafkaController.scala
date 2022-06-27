@@ -606,8 +606,10 @@ class KafkaController(val config: KafkaConfig,
     if (deadBrokersThatWereShuttingDown.nonEmpty)
       info(s"Removed ${deadBrokersThatWereShuttingDown.mkString(",")} from list of shutting down brokers.")
     val allReplicasOnDeadBrokers = controllerContext.replicasOnBrokers(deadBrokers.toSet)
+    // 将断开的broker上的副本状态 =》 offline
     onReplicasBecomeOffline(allReplicasOnDeadBrokers)
 
+    // 移除该broker的BrokerModificationsHandler
     unregisterBrokerModificationsHandler(deadBrokers)
   }
 
@@ -745,9 +747,12 @@ class KafkaController(val config: KafkaConfig,
     // While a reassignment is in progress, deletion is not allowed
     topicDeletionManager.markTopicIneligibleForDeletion(Set(topicPartition.topic), reason = "topic reassignment in progress")
 
+    // 更新zk和内存中的当前topicPartition的rs、ar、rr
     updateCurrentReassignment(topicPartition, reassignment)
 
+    // 该topicPartition需要增加的副本broker
     val addingReplicas = reassignment.addingReplicas
+    // 该topicPartition需要去除的副本broker
     val removingReplicas = reassignment.removingReplicas
 
     if (!isReassignmentComplete(topicPartition, reassignment)) {
@@ -1026,9 +1031,11 @@ class KafkaController(val config: KafkaConfig,
     if (!assignment.isBeingReassigned) {
       true
     } else {
+      // "/brokers/topics/{topic}/partitions/{partitionId}/state" 读取zk配置，判断是否都已经加入了isr
       zkClient.getTopicPartitionStates(Seq(partition)).get(partition).exists { leaderIsrAndControllerEpoch =>
         val isr = leaderIsrAndControllerEpoch.leaderAndIsr.isr.toSet
         val targetReplicas = assignment.targetReplicas.toSet
+        // 判断targetReplicas是否是isr列表的子集合
         targetReplicas.subsetOf(isr)
       }
     }
@@ -1069,10 +1076,12 @@ class KafkaController(val config: KafkaConfig,
   }
 
   private def updateReplicaAssignmentForPartition(topicPartition: TopicPartition, assignment: ReplicaAssignment): Unit = {
+    // 该topic的所有分区方案 与 当前需要迁移的分区方案曲交集
     val topicAssignment = mutable.Map() ++=
       controllerContext.partitionFullReplicaAssignmentForTopic(topicPartition.topic) +=
       (topicPartition -> assignment)
 
+    // /brokers/topics/${topic}
     val setDataResponse = zkClient.setTopicAssignmentRaw(topicPartition.topic,
       controllerContext.topicIds.get(topicPartition.topic),
       topicAssignment, controllerContext.epochZkVersion)
@@ -1171,6 +1180,7 @@ class KafkaController(val config: KafkaConfig,
     if (!zkClient.reassignPartitionsInProgress)
       return
 
+    // "/admin/reassign_partitions"获取迁移任务
     val reassigningPartitions = zkClient.getPartitionReassignment
     val (removingPartitions, updatedPartitionsBeingReassigned) = reassigningPartitions.partition { case (tp, replicas) =>
       shouldRemoveReassignment(tp, replicas)
@@ -1821,7 +1831,9 @@ class KafkaController(val config: KafkaConfig,
       val reassignmentResults = mutable.Map.empty[TopicPartition, ApiError]
       val partitionsToReassign = mutable.Map.empty[TopicPartition, ReplicaAssignment]
 
+      // 查询 /admin/reassign_partitions
       zkClient.getPartitionReassignment.forKeyValue { (tp, targetReplicas) =>
+        // 构建迁移ReplicaAssignment，rs、ar、rr
         maybeBuildReassignment(tp, Some(targetReplicas)) match {
           case Some(context) => partitionsToReassign.put(tp, context)
           case None => reassignmentResults.put(tp, new ApiError(Errors.NO_REASSIGNMENT_IN_PROGRESS))
@@ -1918,6 +1930,11 @@ class KafkaController(val config: KafkaConfig,
     }
   }
 
+  /**
+   * isr列表变动监听器
+   *
+   * @param topicPartition
+   */
   private def processPartitionReassignmentIsrChange(topicPartition: TopicPartition): Unit = {
     if (!isActive) return
 
@@ -1928,6 +1945,7 @@ class KafkaController(val config: KafkaConfig,
 
   private def maybeCompleteReassignment(topicPartition: TopicPartition): Unit = {
     val reassignment = controllerContext.partitionFullReplicaAssignment(topicPartition)
+    // 目的副本是否都已经加入到isr列表
     if (isReassignmentComplete(topicPartition, reassignment)) {
       // resume the partition reassignment process
       info(s"Target replicas ${reassignment.targetReplicas} have all caught up with the leader for " +

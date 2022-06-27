@@ -44,6 +44,7 @@ final class ClusterConnectionStates {
     private final Map<String, NodeConnectionState> nodeState;
     private final Logger log;
     private final HostResolver hostResolver;
+    // 连接中的节点集合
     private Set<String> connectingNodes;
     private ExponentialBackoff reconnectBackoff;
     private ExponentialBackoff connectionSetupTimeout;
@@ -79,6 +80,7 @@ final class ClusterConnectionStates {
         if (state == null)
             return true;
         else
+            // 连接是断开状态 && 距离上次尝试连接时间已经超过的backoff时间
             return state.state.isDisconnected() &&
                    now - state.lastConnectAttemptMs >= state.reconnectBackoffMs;
     }
@@ -106,6 +108,7 @@ final class ClusterConnectionStates {
         NodeConnectionState state = nodeState.get(id);
         if (state == null) return 0;
         if (state.state.isDisconnected()) {
+            // 距离上次尝试连接已经过去的时间
             long timeWaited = now - state.lastConnectAttemptMs;
             return Math.max(state.reconnectBackoffMs - timeWaited, 0);
         } else {
@@ -475,7 +478,9 @@ final class ClusterConnectionStates {
         long lastConnectAttemptMs;
         long failedAttempts;
         long failedConnectAttempts;
+        // 重连的backoff
         long reconnectBackoffMs;
+        // 建立连接的时间
         long connectionSetupTimeoutMs;
         // Connection is being throttled if current time < throttleUntilTimeMs.
         long throttleUntilTimeMs;
@@ -492,9 +497,12 @@ final class ClusterConnectionStates {
             this.addresses = Collections.emptyList();
             this.addressIndex = -1;
             this.authenticationException = null;
+            // 最后一次连接的时间
             this.lastConnectAttemptMs = lastConnectAttempt;
             this.failedAttempts = 0;
+            // 重连的间隔
             this.reconnectBackoffMs = reconnectBackoffMs;
+            // 连接建立的时间
             this.connectionSetupTimeoutMs = connectionSetupTimeoutMs;
             this.throttleUntilTimeMs = 0;
             this.host = host;

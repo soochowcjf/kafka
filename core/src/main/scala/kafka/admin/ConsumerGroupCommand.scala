@@ -565,13 +565,17 @@ object ConsumerGroupCommand extends Logging {
       val consumerGroups = describeConsumerGroups(groupIds)
 
       val groupOffsets = TreeMap[String, (Option[String], Option[Seq[PartitionAssignmentState]])]() ++ (for ((groupId, consumerGroup) <- consumerGroups) yield {
+        // 该消费组的状态
         val state = consumerGroup.state
+        // 获取消费组消费的offset
         val committedOffsets = getCommittedOffsets(groupId)
         var assignedTopicPartitions = ListBuffer[TopicPartition]()
         val rowsWithConsumer = consumerGroup.members.asScala.filter(!_.assignment.topicPartitions.isEmpty).toSeq
           .sortWith(_.assignment.topicPartitions.size > _.assignment.topicPartitions.size).flatMap { consumerSummary =>
+          // 消费组内的所有partition
           val topicPartitions = consumerSummary.assignment.topicPartitions.asScala
           assignedTopicPartitions = assignedTopicPartitions ++ topicPartitions
+          // 这些partition的消费的offset
           val partitionOffsets = consumerSummary.assignment.topicPartitions.asScala
             .map { topicPartition =>
               topicPartition -> committedOffsets.get(topicPartition).map(_.offset)

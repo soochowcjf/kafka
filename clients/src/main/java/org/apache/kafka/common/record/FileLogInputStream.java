@@ -69,7 +69,9 @@ public class FileLogInputStream implements LogInputStream<FileLogInputStream.Fil
         Utils.readFullyOrFail(channel, logHeaderBuffer, position, "log header");
 
         logHeaderBuffer.rewind();
+        // 0-8 8个字节是offset
         long offset = logHeaderBuffer.getLong(OFFSET_OFFSET);
+        // 8-12 4个字节是RecordBatch的消息长度
         int size = logHeaderBuffer.getInt(SIZE_OFFSET);
 
         // V0 has the smallest overhead, stricter checking is done later
@@ -80,6 +82,7 @@ public class FileLogInputStream implements LogInputStream<FileLogInputStream.Fil
         if (position > end - LOG_OVERHEAD - size)
             return null;
 
+        // 16-17 1个字节是魔数
         byte magic = logHeaderBuffer.get(MAGIC_OFFSET);
         final FileChannelRecordBatch batch;
 
@@ -88,6 +91,7 @@ public class FileLogInputStream implements LogInputStream<FileLogInputStream.Fil
         else
             batch = new DefaultFileChannelRecordBatch(offset, magic, fileRecords, position, size);
 
+        // position 请求消息header+消息体的长度
         position += batch.sizeInBytes();
         return batch;
     }

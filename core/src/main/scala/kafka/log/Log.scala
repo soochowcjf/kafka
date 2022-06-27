@@ -308,6 +308,7 @@ class Log(@volatile private var _dir: File,
    */
   @volatile private var highWatermarkMetadata: LogOffsetMetadata = LogOffsetMetadata(logStartOffset)
 
+  // baseOffset => LogSegment
   /* the actual segments of the log */
   private val segments: ConcurrentNavigableMap[java.lang.Long, LogSegment] = new ConcurrentSkipListMap[java.lang.Long, LogSegment]
 
@@ -322,7 +323,9 @@ class Log(@volatile private var _dir: File,
     // create the log directory if it doesn't exist
     Files.createDirectories(dir.toPath)
 
+    // initialize leader-epoch-checkpoint文件
     initializeLeaderEpochCache()
+    // initialize partition.metadata文件
     initializePartitionMetadata()
 
     val nextOffset = loadSegments()
@@ -578,6 +581,7 @@ class Log(@volatile private var _dir: File,
   }
 
   private def initializeLeaderEpochCache(): Unit = lock synchronized {
+    // 在分区目录下创建 leader-epoch-checkpoint 文件
     val leaderEpochFile = LeaderEpochCheckpointFile.newFile(dir)
 
     def newLeaderEpochFileCache(): LeaderEpochFileCache = {
@@ -702,8 +706,10 @@ class Log(@volatile private var _dir: File,
     // segments that come before it
     for (file <- dir.listFiles.sortBy(_.getName) if file.isFile) {
       if (isIndexFile(file)) {
+        // 文件名以offset命名
         // if it is an index file, make sure it has a corresponding .log file
         val offset = offsetFromFile(file)
+        // 判断是否存在响应的.log文件
         val logFile = Log.logFile(dir, offset)
         if (!logFile.exists) {
           warn(s"Found an orphaned index file ${file.getAbsolutePath}, with no corresponding log file.")
@@ -712,6 +718,7 @@ class Log(@volatile private var _dir: File,
       } else if (isLogFile(file)) {
         // if it's a log file, load the corresponding log segment
         val baseOffset = offsetFromFile(file)
+        // 是否存在.timeindex文件
         val timeIndexFileNewlyCreated = !Log.timeIndexFile(dir, baseOffset).exists()
         val segment = LogSegment.open(dir = dir,
           baseOffset = baseOffset,

@@ -274,6 +274,7 @@ public class NetworkClient implements KafkaClient {
         this.clientId = clientId;
         // 默认5
         this.inFlightRequests = new InFlightRequests(maxInFlightRequestsPerConnection);
+        // 50ms 1s 10s 30s
         this.connectionStates = new ClusterConnectionStates(
                 reconnectBackoffMs, reconnectBackoffMax,
                 connectionSetupTimeoutMs, connectionSetupTimeoutMaxMs, logContext, hostResolver);
@@ -283,7 +284,9 @@ public class NetworkClient implements KafkaClient {
         this.socketReceiveBuffer = socketReceiveBuffer;
         this.correlation = 0;
         this.randOffset = new Random();
+        // 30s
         this.defaultRequestTimeoutMs = defaultRequestTimeoutMs;
+        // 默认50ms
         this.reconnectBackoffMs = reconnectBackoffMs;
         this.time = time;
         this.discoverBrokerVersions = discoverBrokerVersions;
@@ -543,6 +546,7 @@ public class NetworkClient implements KafkaClient {
                 request,
                 send,
                 now);
+        // 将该请求加入到响应node对应的请求队列中
         this.inFlightRequests.add(inFlightRequest);
         selector.send(new NetworkSend(clientRequest.destination(), send));
     }
@@ -898,6 +902,7 @@ public class NetworkClient implements KafkaClient {
     private void handleCompletedReceives(List<ClientResponse> responses, long now) {
         for (NetworkReceive receive : this.selector.completedReceives()) {
             String source = receive.source();
+            // 取出该node对应的飞行中的请求
             InFlightRequest req = inFlightRequests.completeNext(source);
 
             AbstractResponse response = parseResponse(receive.payload(), req.header);
@@ -909,9 +914,11 @@ public class NetworkClient implements KafkaClient {
                     req.header.apiKey(), req.destination, req.header, response);
             }
 
+            // 如果有限流的话，需要进行限流
             // If the received response includes a throttle delay, throttle the connection.
             maybeThrottle(response, req.header.apiVersion(), req.destination, now);
             if (req.isInternalRequest && response instanceof MetadataResponse)
+                // metadata更新响应response
                 metadataUpdater.handleSuccessfulResponse(req.header, now, (MetadataResponse) response);
             else if (req.isInternalRequest && response instanceof ApiVersionsResponse)
                 handleApiVersionsResponse(responses, req, now, (ApiVersionsResponse) response);

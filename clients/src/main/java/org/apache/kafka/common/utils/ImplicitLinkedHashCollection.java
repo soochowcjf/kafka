@@ -121,6 +121,7 @@ public class ImplicitLinkedHashCollection<E extends ImplicitLinkedHashCollection
     }
 
     private static void addToListTail(Element head, Element[] elements, int elementIdx) {
+        // -> head -> a -> b -> tail ->
         int oldTailIdx = head.prev();
         Element element = indexToElement(head, elements, elementIdx);
         Element oldTail = indexToElement(head, elements, oldTailIdx);

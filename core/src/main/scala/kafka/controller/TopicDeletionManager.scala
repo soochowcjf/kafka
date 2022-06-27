@@ -316,10 +316,13 @@ class TopicDeletionManager(config: KafkaConfig,
       }
     }
 
+    // 如果是副本所在broker不在线，那么将这些副本的状态变更为 => ReplicaDeletionIneligible
     // move dead replicas directly to failed state
     replicaStateMachine.handleStateChanges(allDeadReplicas, ReplicaDeletionIneligible)
+    // 发送StopReplicaRequest给所有副本，让他们停止进行fetch拉取数据
     // send stop replica to all followers that are not in the OfflineReplica state so they stop sending fetch requests to the leader
     replicaStateMachine.handleStateChanges(allReplicasForDeletionRetry, OfflineReplica)
+    // 发送StopReplicaRequest with deletePartition=true，以便他们删除持久化的磁盘数据
     replicaStateMachine.handleStateChanges(allReplicasForDeletionRetry, ReplicaDeletionStarted)
 
     if (allTopicsIneligibleForDeletion.nonEmpty) {
